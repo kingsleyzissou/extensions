@@ -1,0 +1,18 @@
+{
+  "name": "@kingsleyzissou/quorum",
+  "version": "0.1.0",
+  "description": "Ensemble PR review extension for pi — spawns specialized reviewers in parallel and synthesizes feedback",
+  "module": "index.ts",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.78.1"
+  }
+}
