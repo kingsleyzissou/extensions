@@ -1,0 +1,10 @@
+{
+  "name": "@kingsleyzissou/pacifista-core",
+  "version": "0.1.0",
+  "description": "Core logic for pacifista — plan parsing, state management, pi invocation, QC, and orchestration",
+  "module": "index.ts",
+  "type": "module",
+  "keywords": [
+    "pacifista"
+  ]
+}
