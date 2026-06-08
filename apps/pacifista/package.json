@@ -1,0 +1,14 @@
+{
+  "name": "@kingsleyzissou/pacifista-tui",
+  "version": "0.1.0",
+  "description": "Interactive TUI for pacifista — execute plans with live progress, worktree detection, and approval gates",
+  "module": "cli.ts",
+  "type": "module",
+  "bin": {
+    "kuma": "./cli.ts"
+  },
+  "dependencies": {
+    "@kingsleyzissou/pacifista-core": "workspace:*",
+    "@clack/prompts": "1.5.1"
+  }
+}

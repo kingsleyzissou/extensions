@@ -49,9 +49,20 @@ Per-project config lives at `.pi/agent/sandbox.json`:
   "tag": "latest",
   "pinned": false,
   "lastDigest": null,
-  "lastCheckedAt": null
+  "lastCheckedAt": null,
+  "git": {
+    "user": {
+      "name": "Your Name",
+      "email": "you@example.com"
+    }
+  }
 }
 ```
+
+The `git` field is optional. When set, the sandbox configures
+`git config --global user.name` and `user.email` inside the container
+so commits are authored correctly. If omitted, the extension
+auto-detects from the host's `git config`.
 
 Use:
 

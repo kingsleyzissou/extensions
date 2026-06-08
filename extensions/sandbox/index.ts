@@ -531,12 +531,20 @@ class PathApprovalStore {
 // Per-project sandbox config (.pi/agent/sandbox.json)
 // ---------------------------------------------------------------------------
 
+interface GitIdentity {
+  user: {
+    name: string;
+    email: string;
+  };
+}
+
 interface SandboxProjectConfig {
   image: string;
   tag: string;
   pinned: boolean;
   lastDigest: string | null;
   lastCheckedAt: number | null;
+  git: GitIdentity | null;
 }
 
 const DEFAULT_SANDBOX_PROJECT_CONFIG: SandboxProjectConfig = {
@@ -545,7 +553,21 @@ const DEFAULT_SANDBOX_PROJECT_CONFIG: SandboxProjectConfig = {
   pinned: false,
   lastDigest: null,
   lastCheckedAt: null,
+  git: null,
 };
+
+/**
+ * Read git user.name and user.email from the host's git config.
+ * Returns null if either value is not configured.
+ */
+async function detectHostGitIdentity(): Promise<GitIdentity | null> {
+  const name = await spawnWithTimeout('git', ['config', 'user.name'], 3000);
+  const email = await spawnWithTimeout('git', ['config', 'user.email'], 3000);
+  const userName = name.stdout.trim();
+  const userEmail = email.stdout.trim();
+  if (!userName || !userEmail) return null;
+  return { user: { name: userName, email: userEmail } };
+}
 
 function getSandboxConfigPath(hostCwd: string): string {
   return resolvePath(hostCwd, '.pi', 'agent', 'sandbox.json');
@@ -559,12 +581,17 @@ function loadSandboxProjectConfig(hostCwd: string): SandboxProjectConfig {
   try {
     const raw = readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
+    let git: GitIdentity | null = null;
+    if (parsed.git?.user?.name && parsed.git?.user?.email) {
+      git = { user: { name: parsed.git.user.name, email: parsed.git.user.email } };
+    }
     return {
       image: parsed.image ?? DEFAULT_SANDBOX_PROJECT_CONFIG.image,
       tag: parsed.tag ?? DEFAULT_SANDBOX_PROJECT_CONFIG.tag,
       pinned: parsed.pinned ?? DEFAULT_SANDBOX_PROJECT_CONFIG.pinned,
       lastDigest: parsed.lastDigest ?? null,
       lastCheckedAt: parsed.lastCheckedAt ?? null,
+      git,
     };
   } catch {
     return { ...DEFAULT_SANDBOX_PROJECT_CONFIG };
@@ -1428,6 +1455,24 @@ export default function (pi: ExtensionAPI) {
         process.exit(143);
       });
 
+      // Configure git identity inside the container so commits
+      // are authored correctly. Uses the `git` field from
+      // .pi/agent/sandbox.json if present, otherwise falls back
+      // to the host's git config.
+      const gitId = projectConfig.git ?? (await detectHostGitIdentity());
+      if (gitId) {
+        try {
+          await execCapture(sandbox, `git config --global user.name ${shq(gitId.user.name)}`, 5000);
+          await execCapture(
+            sandbox,
+            `git config --global user.email ${shq(gitId.user.email)}`,
+            5000,
+          );
+        } catch {
+          // Non-fatal — git may not be installed or config dir unwritable
+        }
+      }
+
       // Smoke test (10s timeout)
       const ok = (await execCapture(sandbox, 'id -un && pwd', 10000)).toString().trim();
 
@@ -1761,6 +1806,7 @@ export default function (pi: ExtensionAPI) {
       `󰒓 Sandbox project config (.pi/agent/sandbox.json):`,
       `  Image:  ${imageRef}`,
       `  Pinned: ${cfg.pinned ? 'yes' : 'no'}`,
+      `  Git:    ${cfg.git ? `${cfg.git.user.name} <${cfg.git.user.email}>` : 'auto-detected from host'}`,
       `  Last digest: ${cfg.lastDigest?.slice(0, 19) ?? '—'}...`,
       `  Last checked: ${cfg.lastCheckedAt ? new Date(cfg.lastCheckedAt).toISOString() : 'never'}`,
       ``,
