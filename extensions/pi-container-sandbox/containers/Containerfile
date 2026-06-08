@@ -1,0 +1,165 @@
+# Minimal sandbox image for pi-container-sandbox
+#
+# Goals:
+#   - small, predictable surface area
+#   - tools the agent typically needs to read/edit/grep/build code
+#   - non-root user `pi` (uid/gid 1000) — agent never runs as root
+#   - no SSH, no sudo, no setuid binaries beyond what the base image ships
+#   - GitHub-downloaded binaries are SHA256-verified at build time
+#
+# Built with:
+#   podman build -t pi-container-sandbox:latest -f containers/Containerfile containers
+FROM registry.fedoraproject.org/fedora-minimal:44
+
+ARG ARCH=aarch64
+
+# ── Base system packages ────────────────────────────────────────────
+# Fedora 44 ships recent versions of most modern CLI tools, so we
+# install them directly via dnf5 instead of downloading from GitHub.
+RUN dnf5 install -y --setopt=install_weak_deps=False \
+        bash \
+        bat \
+        ca-certificates \
+        chromium-headless \
+        coreutils \
+        curl \
+        eza \
+        fd-find \
+        file \
+        findutils \
+        git \
+        jq \
+        less \
+        libatomic \
+        make \
+        ripgrep \
+        sed \
+        shadow-utils \
+        tar \
+        tini \
+        unzip \
+        xz \
+        yq \
+ && dnf5 clean all
+
+# ── Helper: download + verify + install ─────────────────────────────
+# Usage: dl-verify <url> <expected-sha256> <output-path>
+# Fails the build if the hash doesn't match.
+RUN printf '#!/bin/sh\nset -e\nURL="$1" HASH="$2" OUT="$3"\nFILE=$(mktemp)\ncurl -fsSL "$URL" -o "$FILE"\necho "$HASH  $FILE" | sha256sum -c\nmv "$FILE" "$OUT"\nchmod +x "$OUT"\n' > /usr/local/bin/dl-verify \
+ && chmod +x /usr/local/bin/dl-verify
+
+# ── GitHub-only tools (not in Fedora repos) ─────────────────────────
+# Pinned to exact versions with SHA256 integrity checks.
+# To upgrade: change VERSION, update the SHA256, rebuild.
+
+# ast-grep — structural code search & replace (AST-aware, not regex)
+ARG AST_GREP_VERSION=0.42.1
+ARG AST_GREP_SHA256=aarch64=3ba383839044cf9817929435f5ce0027f91d06931e8efb32d942e58d73d92be5
+RUN dl-verify \
+      https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-${ARCH}-unknown-linux-gnu.zip \
+      "${AST_GREP_SHA256##*$ARCH=}" \
+      /tmp/ast-grep.zip \
+ && unzip -o /tmp/ast-grep.zip -d /tmp/ast-grep-out \
+ && if [ -f /tmp/ast-grep-out/app-${ARCH}-unknown-linux-gnu ]; then \
+      mv /tmp/ast-grep-out/app-${ARCH}-unknown-linux-gnu /usr/local/bin/ast-grep; \
+    elif [ -f /tmp/ast-grep-out/sg ]; then \
+      mv /tmp/ast-grep-out/sg /usr/local/bin/ast-grep; \
+    else \
+      echo "ERROR: ast-grep binary not found in zip" >&2; exit 1; \
+    fi \
+ && chmod +x /usr/local/bin/ast-grep \
+ && rm -rf /tmp/ast-grep.zip /tmp/ast-grep-out
+
+# uv — fast Python package manager (replaces pip)
+ARG UV_VERSION=0.11.7
+ARG UV_SHA256=aarch64=f2ee1cde9aabb4c6e43bd3f341dadaf42189a54e001e521346dc31547310e284
+RUN dl-verify \
+      https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz \
+      "${UV_SHA256##*$ARCH=}" \
+      /tmp/uv.tar.gz \
+ && tar xzf /tmp/uv.tar.gz -C /tmp \
+ && mv /tmp/uv-${ARCH}-unknown-linux-gnu/uv /usr/local/bin/uv \
+ && mv /tmp/uv-${ARCH}-unknown-linux-gnu/uvx /usr/local/bin/uvx \
+ && rm -rf /tmp/uv.tar.gz /tmp/uv-${ARCH}-unknown-linux-gnu
+
+# ── Python 3.13.9 via uv ──────────────────────────────────────────
+# uv-managed Python so we control the exact version across rebuilds.
+ENV UV_PYTHON_DIR=/opt/uv-python
+RUN uv python install 3.13.9 \
+ && PYTHON_BIN=$(uv python find 3.13.9) \
+ && ln -sf "$PYTHON_BIN" /usr/local/bin/python3 \
+ && ln -sf "$PYTHON_BIN" /usr/local/bin/python \
+ && python3 --version
+
+# ── Wrapper scripts: modern tools override legacy commands ──────────
+# The sandbox agent runs commands via `sh -c` which doesn't support
+# aliases. Wrapper scripts in /usr/local/bin work in ALL shells.
+# Original binaries remain at /usr/bin for scripts needing POSIX behavior.
+
+# cat → bat (plain output, no paging)
+RUN printf '#!/bin/sh\nexec bat --paging=never --style=plain "$@"\n' > /usr/local/bin/cat \
+ && chmod +x /usr/local/bin/cat
+
+# ls → eza
+RUN printf '#!/bin/sh\nexec eza --icons "$@"\n' > /usr/local/bin/ls \
+ && chmod +x /usr/local/bin/ls
+
+# pip → uv pip
+RUN printf '#!/bin/sh\nexec uv pip "$@"\n' > /usr/local/bin/pip \
+ && printf '#!/bin/sh\nexec uv pip "$@"\n' > /usr/local/bin/pip3 \
+ && chmod +x /usr/local/bin/pip /usr/local/bin/pip3
+
+# ── Bash aliases (for interactive use only — `!` commands) ──────────
+# NOTE: Heredocs don't work reliably in Containerfiles (podman interprets
+# lines like `alias` as instructions). Use printf instead.
+RUN printf '\n# Modern tool aliases for pi-container-sandbox\nalias ll="eza --icons -l --git"\nalias la="eza --icons -la --git"\nalias lt="eza --icons --tree --level=3"\n' >> /etc/bashrc
+
+RUN printf '# Modern tool aliases for pi-container-sandbox (login shells)\nalias ll="eza --icons -l --git"\nalias la="eza --icons -la --git"\nalias lt="eza --icons --tree --level=3"\n' > /etc/profile.d/sandbox-aliases.sh
+
+# ── Runtime: bun ────────────────────────────────────────────────────
+ARG BUN_VERSION=1.3.13
+ARG BUN_ARCH=aarch64
+ARG BUN_SHA256=aarch64=70bae41b3908b0a120e1e58c5c8af30e74afae3b8d11b0d3fdd8e787ddfb4b22
+RUN dl-verify \
+      https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BUN_ARCH}.zip \
+      "${BUN_SHA256##*$BUN_ARCH=}" \
+      /tmp/bun.zip \
+ && unzip -o /tmp/bun.zip -d /tmp/bun-out \
+ && mv /tmp/bun-out/bun-linux-${BUN_ARCH}/bun /usr/local/bin/bun \
+ && ln -sf /usr/local/bin/bun /usr/local/bin/bunx \
+ && chmod +x /usr/local/bin/bun \
+ && rm -rf /tmp/bun.zip /tmp/bun-out \
+ && bun --version
+
+
+# ── Node.js v25 ─────────────────────────────────────────────────────
+ARG NODE_VERSION=25.9.0
+ARG NODE_ARCH=arm64
+ARG NODE_SHA256=bf007bf0dcc2fddd90888fde374a1ad33c1ab2ca2ad324c645dd7aed0f9f1460
+RUN dl-verify \
+      https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz \
+      ${NODE_SHA256} \
+      /tmp/node.tar.xz \
+ && tar xf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner \
+ && ln -sf /usr/local/bin/node /usr/local/bin/nodejs \
+ && rm -f /tmp/node.tar.xz \
+ && node --version \
+ && npm --version
+
+# Remove the build helper — no longer needed, reduces attack surface
+RUN rm -f /usr/local/bin/dl-verify
+
+# ── Non-root user ───────────────────────────────────────────────────
+# uid 1000 keeps file ownership predictable when the host cwd
+# is bind-mounted into /workspace.
+RUN groupadd -g 1000 pi \
+ && useradd  -m -u 1000 -g 1000 -s /bin/bash pi \
+ && mkdir -p /workspace \
+ && chown -R pi:pi /workspace /home/pi
+
+USER pi
+WORKDIR /workspace
+
+# tini reaps zombies so long-running agent shells stay tidy
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sleep", "infinity"]

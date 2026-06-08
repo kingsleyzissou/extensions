@@ -17,6 +17,13 @@
         "typescript": "5.9.3",
       },
     },
+    "extensions/pi-container-sandbox": {
+      "name": "@kingsleyzissou/pi-container-sandbox",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "0.78.1",
+      },
+    },
     "extensions/quorum": {
       "name": "@kingsleyzissou/quorum",
       "version": "0.1.0",
@@ -120,6 +127,8 @@
     "@humanwhocodes/module-importer": ["@humanwhocodes/module-importer@1.0.1", "", {}, "sha512-bxveV4V8v5Yb4ncFTT3rPSgZBOpCkjfK0y4oVVVJwIuDVBRMDXrPyXRL988i5ap9m9bnyEEjWfm5WkBmtffLfA=="],
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
+
+    "@kingsleyzissou/pi-container-sandbox": ["@kingsleyzissou/pi-container-sandbox@workspace:extensions/pi-container-sandbox"],
 
     "@kingsleyzissou/quorum": ["@kingsleyzissou/quorum@workspace:extensions/quorum"],
 
