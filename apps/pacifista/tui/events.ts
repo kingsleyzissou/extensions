@@ -1,0 +1,198 @@
+import * as p from '@clack/prompts';
+import type { PacifistaEvent } from '@kingsleyzissou/pacifista-core';
+
+/**
+ * Collapse line continuations and newlines, but do NOT truncate.
+ */
+function formatCommand(raw: string): string {
+  return raw.replace(/\\\n/g, ' ').replace(/\n/g, ' && ').replace(/\s+/g, ' ').trim();
+}
+
+function formatElapsed(startTime: number): string {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  return mins > 0 ? `${mins}m ${secs.toString().padStart(2, '0')}s` : `${secs}s`;
+}
+
+/**
+ * Create an event handler backed by clack's spinner.
+ *
+ * The spinner message format:
+ *   <elapsed> · <tool>: <full message>
+ *
+ * Elapsed time is updated every second via an interval.
+ * Tool messages are shown in full — no truncation.
+ */
+export function createEventRenderer(): {
+  handler: (event: PacifistaEvent) => void;
+  startSpinner: () => void;
+  stopSpinner: (message?: string) => void;
+} {
+  const s = p.spinner();
+  let spinnerActive = false;
+  let taskStartTime = 0;
+  let currentStatus = '';
+  let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+  const updateMessage = () => {
+    if (!spinnerActive) return;
+    const elapsed = formatElapsed(taskStartTime);
+    s.message(`${elapsed} · ${currentStatus}`);
+  };
+
+  const startTimer = () => {
+    stopTimer();
+    taskStartTime = Date.now();
+    timerInterval = setInterval(updateMessage, 1000);
+  };
+
+  const stopTimer = () => {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  };
+
+  const startSpinner = () => {
+    if (!spinnerActive) {
+      s.start('starting...');
+      spinnerActive = true;
+      startTimer();
+    }
+  };
+
+  const stopSpinner = (message?: string) => {
+    stopTimer();
+    if (spinnerActive) {
+      s.stop(message ?? 'Done');
+      spinnerActive = false;
+    }
+  };
+
+  const setStatus = (status: string) => {
+    currentStatus = status;
+    updateMessage();
+  };
+
+  const handler = (event: PacifistaEvent): void => {
+    switch (event.type) {
+      case 'plan:loaded':
+        p.log.info(`Plan: ${event.plan.title} (${event.plan.tasks.length} tasks)`);
+        break;
+
+      case 'task:start':
+        stopSpinner();
+        p.log.step(`Task ${event.task.id}: ${event.task.title} (attempt ${event.attempt})`);
+        startSpinner();
+        setStatus('agent starting...');
+        break;
+
+      case 'task:complete':
+        if (event.exitCode !== 0) {
+          stopSpinner(`Agent exited with code ${event.exitCode}`);
+        } else {
+          stopSpinner('Agent complete');
+        }
+        break;
+
+      case 'tool:start':
+        if (!spinnerActive) break;
+        if (event.toolName === 'bash') {
+          const cmd = formatCommand(String(event.args['command'] ?? ''));
+          setStatus(`bash: ${cmd}`);
+        } else if (event.toolName === 'edit') {
+          setStatus(`editing: ${String(event.args['path'] ?? '')}`);
+        } else if (event.toolName === 'write') {
+          setStatus(`writing: ${String(event.args['path'] ?? '')}`);
+        } else if (event.toolName === 'read') {
+          setStatus(`reading: ${String(event.args['path'] ?? '')}`);
+        } else {
+          setStatus(`${event.toolName}...`);
+        }
+        break;
+
+      case 'tool:end':
+        if (spinnerActive && event.isError) {
+          setStatus(`✗ ${event.toolName} failed`);
+        }
+        break;
+
+      case 'agent:thinking':
+        if (spinnerActive) {
+          setStatus('thinking...');
+        }
+        break;
+
+      case 'checks:start':
+        startSpinner();
+        setStatus('running checks...');
+        break;
+
+      case 'checks:done': {
+        const summary = event.result.checks.map(c => `${c.name} ${c.status}`).join(' · ');
+        stopSpinner(`Checks: ${summary}`);
+        break;
+      }
+
+      case 'task:approved':
+        p.log.success(`Task ${event.task.id} approved`);
+        break;
+
+      case 'task:rejected':
+        p.log.error(`Task ${event.task.id} rejected`);
+        break;
+
+      case 'state:saved':
+        p.log.info('State saved. Resume later with `kuma resume`.');
+        break;
+
+      case 'review:start':
+        startSpinner();
+        setStatus('starting ensemble review...');
+        break;
+
+      case 'review:reviewing':
+        setStatus('ensemble review: reviewing...');
+        break;
+
+      case 'review:triage':
+        setStatus('ensemble review: triaging findings...');
+        break;
+
+      case 'review:fix':
+        setStatus(
+          `ensemble review: applying fix ${event.current}/${event.total} — ${event.description}`,
+        );
+        break;
+
+      case 'review:done':
+        stopSpinner(`Review complete (${event.fixes} fixes applied)`);
+        break;
+
+      case 'error':
+        stopSpinner();
+        p.log.error(event.message);
+        break;
+
+      case 'run:summary': {
+        const r = event.result;
+        const lines = r.tasks.map(task => {
+          const icon =
+            task.status === 'approved'
+              ? '✓'
+              : task.status === 'rejected'
+                ? '✗'
+                : task.status === 'skipped'
+                  ? '○'
+                  : '…';
+          return `${icon} Task ${task.id}: ${task.title} [${task.status}]`;
+        });
+        p.note(lines.join('\n'), `${r.completed}/${r.total} tasks completed`);
+        break;
+      }
+    }
+  };
+
+  return { handler, startSpinner, stopSpinner };
+}
