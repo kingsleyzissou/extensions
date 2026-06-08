@@ -1,9 +1,8 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "init",
+      "name": "pi-extensions",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "0.78.1",
         "@eslint/js": "9.39.4",
@@ -16,6 +15,16 @@
       },
       "peerDependencies": {
         "typescript": "5.9.3",
+      },
+    },
+    "extensions/pacifista": {
+      "name": "@kingsleyzissou/pacifista",
+      "version": "0.1.0",
+      "dependencies": {
+        "@kingsleyzissou/pacifista-core": "workspace:*",
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "0.78.1",
       },
     },
     "extensions/quorum": {
@@ -129,6 +138,8 @@
     "@humanwhocodes/module-importer": ["@humanwhocodes/module-importer@1.0.1", "", {}, "sha512-bxveV4V8v5Yb4ncFTT3rPSgZBOpCkjfK0y4oVVVJwIuDVBRMDXrPyXRL988i5ap9m9bnyEEjWfm5WkBmtffLfA=="],
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
+
+    "@kingsleyzissou/pacifista": ["@kingsleyzissou/pacifista@workspace:extensions/pacifista"],
 
     "@kingsleyzissou/pacifista-core": ["@kingsleyzissou/pacifista-core@workspace:libs/pacifista-core"],
 
@@ -744,7 +755,7 @@
 
     "@eslint/eslintrc/minimatch": ["minimatch@3.1.5", "", { "dependencies": { "brace-expansion": "^1.1.7" } }, "sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w=="],
 
-    "@typescript-eslint/typescript-estree/semver": ["semver@7.8.2", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-c8jsqUZm3omBOI66G90z1Dyw5z622G8oLG+omfsHBJf3CWQTlOcwOjvOG6wtiNfW6anKm/eA39LMwMtMez2TiQ=="],
+    "@typescript-eslint/typescript-estree/semver": ["semver@7.8.3", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-wnilbGyMxzbY7dNOl7jpKbLSjcfeweJWU5j4+u5qW+6/wuGD9KzIGOyZnQVSBM9E7DtWaaH3CyHkppYrKYoxwg=="],
 
     "@typescript-eslint/visitor-keys/eslint-visitor-keys": ["eslint-visitor-keys@5.0.1", "", {}, "sha512-tD40eHxA35h0PEIZNeIjkHoDR4YjjJp34biM0mDvplBe//mB+IHCqHDGV7pxF+7MklTvighcCPPZC7ynWyjdTA=="],
 
