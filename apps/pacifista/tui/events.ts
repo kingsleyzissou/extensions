@@ -23,6 +23,10 @@ function formatElapsed(startTime: number): string {
  *
  * Elapsed time is updated every second via an interval.
  * Tool messages are shown in full — no truncation.
+ *
+ * Important: anything that writes directly to stdout/stderr
+ * (e.g. a hook using `stdio: 'inherit'`) will corrupt the
+ * spinner’s cursor positioning. Hooks should pipe their I/O.
  */
 export function createEventRenderer(): {
   handler: (event: PacifistaEvent) => void;
@@ -79,6 +83,27 @@ export function createEventRenderer(): {
     switch (event.type) {
       case 'plan:loaded':
         p.log.info(`Plan: ${event.plan.title} (${event.plan.tasks.length} tasks)`);
+        break;
+
+      case 'setup:start':
+        startSpinner();
+        setStatus(`setup: ${event.command}`);
+        break;
+
+      case 'setup:output': {
+        stopSpinner();
+        const lines = event.text
+          .split('\n')
+          .map(line => `  \x1b[2m${line}\x1b[0m`)
+          .join('\n');
+        console.log(lines);
+        startSpinner();
+        setStatus('setup...');
+        break;
+      }
+
+      case 'setup:done':
+        stopSpinner(event.ok ? 'Setup complete' : 'Setup failed');
         break;
 
       case 'task:start':
@@ -146,6 +171,28 @@ export function createEventRenderer(): {
       case 'state:saved':
         p.log.info('State saved. Resume later with `kuma resume`.');
         break;
+
+      case 'final-checks:start':
+        startSpinner();
+        setStatus('running final checks...');
+        break;
+
+      case 'final-checks:done': {
+        const finalSummary = event.result.checks.map(c => `${c.name} ${c.status}`).join(' · ');
+        stopSpinner(`Final checks: ${finalSummary}`);
+        break;
+      }
+
+      case 'final-checks:failed': {
+        const failSummary = event.result.checks.map(c => `${c.name} ${c.status}`).join(' · ');
+        stopSpinner(`Final checks failed: ${failSummary}`);
+        for (const check of event.result.checks) {
+          if (check.output) {
+            p.log.error(`${check.name}:\n${check.output}`);
+          }
+        }
+        break;
+      }
 
       case 'review:start':
         startSpinner();
