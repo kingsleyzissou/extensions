@@ -1,0 +1,24 @@
+{
+  "name": "@kingsleyzissou/pacifista",
+  "version": "0.1.0",
+  "description": "Pi extension for pacifista — execute markdown plans with /execute",
+  "module": "index.ts",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "dependencies": {
+    "@kingsleyzissou/pacifista-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.78.1"
+  }
+}
