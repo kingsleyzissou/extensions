@@ -1,5 +1,5 @@
 {
-  "name": "@kingsleyzissou/pi-container-sandbox",
+  "name": "@kingsleyzissou/sandbox",
   "version": "0.1.0",
   "description": "pi extension that runs every read/write/edit/bash op inside a per-session Linux container (Podman)",
   "module": "index.ts",
