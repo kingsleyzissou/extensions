@@ -1,0 +1,30 @@
+{
+  "name": "@kingsleyzissou/pi-container-sandbox",
+  "version": "0.1.0",
+  "description": "pi extension that runs every read/write/edit/bash op inside a per-session Linux container (Podman)",
+  "module": "index.ts",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "sandbox",
+    "container",
+    "podman",
+    "security"
+  ],
+  "files": [
+    "index.ts",
+    "containers/"
+  ],
+  "scripts": {
+    "build": "podman build -t pi-sandbox:latest -f containers/Containerfile containers"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.78.1"
+  }
+}
