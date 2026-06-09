@@ -23,7 +23,7 @@ import {
   runReviewer,
   runWithConcurrency,
 } from "./lib.ts";
-import type { ReviewerResult } from "./types.ts";
+import type { ReviewerResult, QuorumOutput } from "./types.ts";
 import { PROJECT_LABELS } from "./types.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -32,6 +32,15 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("review", {
     description: "Run ensemble PR review with specialized reviewers",
     handler: async (args, ctx) => {
+      // Parse --output flag for structured JSON output (used by kuma)
+      let outputPath: string | undefined;
+      let cleanedArgs = args;
+      const outputMatch = cleanedArgs.match(/--output\s+(\S+)/);
+      if (outputMatch) {
+        outputPath = outputMatch[1];
+        cleanedArgs = cleanedArgs.replace(/--output\s+\S+/, "").trim();
+      }
+
       // 1. Detect project type (with bare repo / worktree support)
       let reviewCwd = ctx.cwd;
       let projectType = await detectProjectType(reviewCwd);
@@ -68,7 +77,7 @@ export default function (pi: ExtensionAPI) {
 
       // 2. Detect or use provided base branch
       const baseBranch =
-        args?.trim() || (await detectBaseBranch(pi.exec.bind(pi), reviewCwd)); // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- args may be undefined at runtime
+        cleanedArgs.trim() || (await detectBaseBranch(pi.exec.bind(pi), reviewCwd));
       ctx.ui.setStatus("quorum", "Quorum: preparing...");
       if (!baseBranch) {
         ctx.ui.notify(
@@ -152,13 +161,16 @@ export default function (pi: ExtensionAPI) {
 
         ctx.ui.notify(summary, "info");
 
-        const proceed = await ctx.ui.confirm(
-          "Proceed with review?",
-          `${commitLines.length} commit(s), ${fileLines.length} file(s) changed`,
-        );
-        if (!proceed) {
-          ctx.ui.setStatus("quorum", undefined);
-          return;
+        // Skip confirmation in --output mode (non-interactive)
+        if (!outputPath) {
+          const proceed = await ctx.ui.confirm(
+            "Proceed with review?",
+            `${commitLines.length} commit(s), ${fileLines.length} file(s) changed`,
+          );
+          if (!proceed) {
+            ctx.ui.setStatus("quorum", undefined);
+            return;
+          }
         }
 
         // 6. Select reviewers for this project type
@@ -241,37 +253,61 @@ export default function (pi: ExtensionAPI) {
           },
         );
 
-        // 9. Compile results and send to agent for synthesis
+        // 9. Compile results
         const successCount = results.filter((r) => r.exitCode === 0).length;
-        const sections = results.map((r) => {
-          const status = r.exitCode === 0 ? "" : " (FAILED)";
-          const content =
-            r.exitCode === 0 ? r.output : `Error: ${r.error || r.output}`;
-          return `### ${r.label} Review${status}\n\n${content}`;
-        });
 
-        const synthesisPrompt = [
-          `The following PR review was conducted by ${reviewers.length} specialized reviewers (${successCount} succeeded).`,
-          `Project type: ${PROJECT_LABELS[projectType]}. Base branch: ${baseBranch}. Commits: ${commitCount}.`,
-          "",
-          "Synthesize their feedback into a unified PR review summary with these sections:",
-          "",
-          "**Critical (must fix):** Issues that would block merge",
-          "**Suggestions (should consider):** Improvements worth discussing",
-          "**Positive observations:** Good patterns to acknowledge",
-          "",
-          "Deduplicate overlapping feedback. Format as a PR review comment ready to post.",
-          "",
-          "---",
-          "",
-          ...sections,
-        ].join("\n");
+        if (outputPath) {
+          // Structured JSON output for programmatic consumers (kuma)
+          const output: QuorumOutput = {
+            baseBranch,
+            projectType,
+            commitCount,
+            reviewers: results.map((r) => ({
+              name: r.reviewer,
+              label: r.label,
+              output: r.output,
+              exitCode: r.exitCode,
+              error: r.error,
+            })),
+          };
+          fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+          ctx.ui.setStatus("quorum", undefined);
+          ctx.ui.notify(
+            `Review complete: ${successCount}/${reviewers.length} reviewers succeeded. Results written to ${outputPath}`,
+            "info",
+          );
+        } else {
+          // Interactive mode: synthesize via agent
+          const sections = results.map((r) => {
+            const status = r.exitCode === 0 ? "" : " (FAILED)";
+            const content =
+              r.exitCode === 0 ? r.output : `Error: ${r.error || r.output}`;
+            return `### ${r.label} Review${status}\n\n${content}`;
+          });
 
-        ctx.ui.setStatus(
-          "quorum",
-          `Quorum: ${successCount}/${reviewers.length} succeeded -- synthesizing...`,
-        );
-        pi.sendUserMessage(synthesisPrompt, { deliverAs: "followUp" });
+          const synthesisPrompt = [
+            `The following PR review was conducted by ${reviewers.length} specialized reviewers (${successCount} succeeded).`,
+            `Project type: ${PROJECT_LABELS[projectType]}. Base branch: ${baseBranch}. Commits: ${commitCount}.`,
+            "",
+            "Synthesize their feedback into a unified PR review summary with these sections:",
+            "",
+            "**Critical (must fix):** Issues that would block merge",
+            "**Suggestions (should consider):** Improvements worth discussing",
+            "**Positive observations:** Good patterns to acknowledge",
+            "",
+            "Deduplicate overlapping feedback. Format as a PR review comment ready to post.",
+            "",
+            "---",
+            "",
+            ...sections,
+          ].join("\n");
+
+          ctx.ui.setStatus(
+            "quorum",
+            `Quorum: ${successCount}/${reviewers.length} succeeded -- synthesizing...`,
+          );
+          pi.sendUserMessage(synthesisPrompt, { deliverAs: "followUp" });
+        }
       } finally {
         // Clean up temp directory and status
         fs.rmSync(tmpDir, { recursive: true, force: true });

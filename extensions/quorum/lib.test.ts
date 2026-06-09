@@ -270,10 +270,13 @@ describe("runWithConcurrency", () => {
   });
 
   test("propagates errors", async () => {
-    expect(
-      runWithConcurrency([1, 2, 3], 2, async (item) => {
+    expect.assertions(1);
+    try {
+      await runWithConcurrency([1, 2, 3], 2, async (item) => {
         if (item === 2) throw new Error("boom");
-      }),
-    ).rejects.toThrow("boom");
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+    }
   });
 });
