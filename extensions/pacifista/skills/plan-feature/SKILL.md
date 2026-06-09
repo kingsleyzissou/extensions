@@ -1,13 +1,13 @@
 ---
 name: plan-feature
-description: Interactive planning session that produces a markdown plan file compatible with pacifista. Use when you need to break a feature or bugfix into discrete, agent-executable tasks with TDD and quality gates.
+description: Interactive planning session that produces a markdown plan file compatible with kuma. Use when you need to break a feature or bugfix into discrete, agent-executable tasks with TDD and quality gates.
 scopes: [global]
 ---
 
 # Plan Feature
 
 Interactive session that produces a single artifact: a markdown plan file
-formatted for pacifista execution. The plan drives mechanical, task-by-task
+formatted for kuma execution. The plan drives mechanical, task-by-task
 execution with isolated agent sessions, deterministic QC, and user approval
 gates.
 
@@ -27,7 +27,7 @@ docs/plans/YYYY-MM-DD-<topic>.md
 
 ## Plan Format
 
-The pacifista plan parser expects this structure. Follow it exactly.
+The kuma plan parser expects this structure. Follow it exactly.
 
 ```markdown
 # Plan: <Feature Name>
@@ -198,7 +198,7 @@ Tell the user:
 > To execute:
 >
 > ```bash
-> pacifista execute docs/plans/<filename>.md -w ./<worktree>
+> kuma execute docs/plans/<filename>.md -w ./<worktree>
 > ```
 >
-> Or just run `pacifista` for the interactive wizard.
+> Or just run `kuma` for the interactive wizard.

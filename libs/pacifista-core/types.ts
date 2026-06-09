@@ -58,7 +58,20 @@ export type GateConfig = {
   autoApprove: boolean | ((task: PlanTask, result: ChecksResult) => boolean);
 };
 
-// ── State types ─────────────────────────────────────────────────────────
+// ── Journal event types ─────────────────────────────────────────────────
+
+export type JournalEvent =
+  | { type: "run:started"; planPath: string; worktreePath: string; ts: string; tasks: { id: number; title: string }[] }
+  | { type: "task:started"; taskId: number; attempt: number; sessionId?: string; ts: string }
+  | { type: "task:checked"; taskId: number; attempt: number; checksResult: ChecksResult; changedFiles: string[]; ts: string }
+  | { type: "task:approved"; taskId: number; attempt: number; commitSha?: string; ts: string }
+  | { type: "task:revised"; taskId: number; attempt: number; feedback: string; ts: string }
+  | { type: "task:rejected"; taskId: number; attempt: number; stop: boolean; ts: string }
+  | { type: "task:skipped"; taskId: number; ts: string }
+  | { type: "run:paused"; ts: string }
+  | { type: "run:completed"; ts: string };
+
+// ── State types (derived from journal replay) ───────────────────────────
 
 export type RunState = {
   planPath: string;
@@ -82,6 +95,7 @@ export type Attempt = {
   changedFiles?: string[];
   outcome?: "approved" | "revise" | "rejected";
   revision?: string;
+  sessionId?: string;
 };
 
 export type CheckResult = {
@@ -100,7 +114,6 @@ export type ChecksResult = {
 export type RunOptions = {
   planPath: string;
   worktreePath: string;
-  projectRoot?: string;
   startFromTask?: number;
   commitPerTask?: boolean;
   skipReview?: boolean;
