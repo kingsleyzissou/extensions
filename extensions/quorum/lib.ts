@@ -287,6 +287,9 @@ export async function runWithConcurrency<T>(
   concurrency: number,
   fn: (item: T, index: number) => Promise<void>,
 ): Promise<void> {
+  if (concurrency <= 0) {
+    throw new Error(`runWithConcurrency: concurrency must be > 0, got ${concurrency}`);
+  }
   let nextIndex = 0;
   const workers = Array.from(
     { length: Math.min(concurrency, items.length) },
