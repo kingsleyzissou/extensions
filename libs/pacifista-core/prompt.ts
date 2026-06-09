@@ -75,21 +75,42 @@ export function buildTaskPrompt(
 
 /**
  * Build a triage prompt for evaluating review findings.
+ *
+ * Accepts either structured reviewer outputs (from quorum --output)
+ * or a file path to a review document (legacy fallback).
  */
-export function buildTriagePrompt(reviewPath: string): string {
-  return [
-    `Read the review document at ${reviewPath}.`,
+export function buildTriagePrompt(
+  reviewData: { reviewers: { label: string; output: string; exitCode: number }[] } | string,
+): string {
+  const header = [
+    "The following review findings were produced by an ensemble of specialized reviewers.",
     "",
     "For each finding, evaluate it against the actual code and render a verdict:",
     '- **fix**: The finding is valid and should be fixed. Include the target commit SHA.',
     '- **defer**: The finding is valid but can be addressed later.',
     '- **pushback**: The finding is incorrect or not applicable.',
     "",
-    "Return your response as a JSON array:",
+    "IMPORTANT: Be concise. Keep descriptions to one sentence.",
+    "Do NOT read source files or verify findings against the code —",
+    "triage based solely on the reviewer output provided below.",
+    "",
+    "Return ONLY a JSON array, no other text:",
     "```json",
-    '[{ "id": 1, "verdict": "fix", "sha": "abc123", "description": "..." }, ...]',
+    '[{ "id": 1, "verdict": "fix", "sha": "abc123", "description": "one-sentence summary" }, ...]',
     "```",
-  ].join("\n");
+  ];
+
+  if (typeof reviewData === "string") {
+    // Legacy: file path
+    return [`Read the review document at ${reviewData}.`, "", ...header].join("\n");
+  }
+
+  // Structured: inline reviewer outputs
+  const sections = reviewData.reviewers
+    .filter((r) => r.exitCode === 0)
+    .map((r) => `### ${r.label} Review\n\n${r.output}`);
+
+  return [...header, "", "---", "", ...sections].join("\n");
 }
 
 /**
