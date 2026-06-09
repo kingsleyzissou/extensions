@@ -58,6 +58,8 @@ context can implement this in a single session. Include:
 ## Task 2: <Title>
 
 ...
+
+- **commit**: `Component: short description`
 ```
 
 ### Format Rules
@@ -76,6 +78,7 @@ context can implement this in a single session. Include:
 6. **Structured fields** (optional, extracted by parser):
    - `- **files**: src/foo.ts, src/bar.ts` -- files involved
    - `- **acceptance**: tests pass, type exports correctly` -- done criteria
+   - `- **commit**: \`Component: short description\`` -- commit message
    - `- **depends**: 1` -- task dependency (reserved, not yet enforced)
 
 ## Planning Process
@@ -103,6 +106,12 @@ Break the work into tasks that follow these constraints:
   task will create
 - **Self-contained descriptions** -- an agent seeing only the Context
   section + this one task must be able to implement it without guessing
+- **Every task must produce code changes** -- do NOT create
+  verification-only tasks (e.g. "verify everything works", "run the
+  test suite", "check for regressions"). The orchestrator runs QC
+  automatically after every task and runs a full QC suite after all
+  tasks complete. A task that produces no file changes will fail the
+  commit step.
 
 ### 3. Write the Context Section
 
@@ -121,9 +130,32 @@ For each task, include:
 - A clear title that describes the deliverable (not the activity)
 - What files to create, modify, or delete
 - Expected behavior and edge cases
-- The `files` and `acceptance` structured fields where useful
+- The `files`, `acceptance`, and `commit` structured fields where useful
 - Exact code snippets when precision matters (e.g., type definitions,
   API contracts)
+
+### Commit Messages
+
+Each task should include a `commit` field with a pre-written commit
+message. The orchestrator commits on the host after approval — the
+agent never runs `git commit`.
+
+Follow these conventions:
+
+- **Format**: `Component: short description`
+- Prefix with the component or area, followed by a colon and space
+- Use sentence case after the prefix
+- Keep under 72 characters
+- Use imperative mood ("add", "fix", "remove")
+- Do NOT use semantic prefixes (feat, fix, chore, etc.)
+
+Examples:
+- `- **commit**: \`TimezoneSelector: add component skeleton\``
+- `- **commit**: \`store: add derived selectors for FS customizations\``
+- `- **commit**: \`tests: remove legacy azure integration test\``
+
+If the task title already follows this format, you can omit the
+`commit` field — the orchestrator will fall back to the task title.
 
 ### 5. Review with the User
 

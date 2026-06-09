@@ -5,7 +5,7 @@ export { loadConfig } from "./config.ts";
 export { loadState, saveState, createState, getStatePath } from "./state.ts";
 export { piStream, piCapture, piReview } from "./pi.ts";
 export { buildTaskPrompt, buildTriagePrompt, buildFixPrompt } from "./prompt.ts";
-export { runQualityChecks, detectTests, runScopedTests } from "./qc.ts";
+export { runChecks } from "./checks.ts";
 export { runReviewStage } from "./review.ts";
 
 // Types
@@ -13,7 +13,7 @@ export type {
   Plan,
   PlanTask,
   PacifistaConfig,
-  QcConfig,
+  Check,
   PiConfig,
   Hooks,
   PromptConfig,
@@ -22,7 +22,9 @@ export type {
   RunState,
   TaskState,
   Attempt,
-  QcResult,
+  CheckResult,
+  ChecksResult,
+  ExecResult,
   RunOptions,
   RunResult,
   TaskResult,

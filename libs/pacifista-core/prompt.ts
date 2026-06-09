@@ -5,7 +5,6 @@ export function buildTaskPrompt(
   task: PlanTask,
   options: {
     revision?: string;
-    commitPerTask?: boolean;
     promptConfig?: PromptConfig;
   } = {},
 ): string {
@@ -61,38 +60,15 @@ export function buildTaskPrompt(
     );
   }
 
-  // Commit instructions
-  if (options.commitPerTask) {
-    sections.push(
-      [
-        "## Commit",
-        "",
-        "When done, commit all changes following these conventions:",
-        "",
-        "- **Format**: `Component: short description`",
-        "- Prefix with the component or area the change primarily touches, followed by a colon and space",
-        "- Use sentence case after the prefix (lowercase unless proper noun)",
-        "- Keep the subject under 72 characters",
-        "- Use imperative mood (\"add\", \"fix\", \"remove\" — not \"added\", \"fixes\", \"removed\")",
-        "- Do NOT use semantic prefixes (feat, fix, chore, etc.)",
-        "- Do NOT mention any plan, task number, or orchestration system",
-        "",
-        "If a body is needed, explain **why** (not what), wrap at 72 chars,",
-        "and leave a blank line between subject and body. Skip the body for",
-        "self-explanatory changes.",
-        "",
-        "Add a `Co-authored-by` trailer for AI attribution:",
-        "",
-        "```",
-        "Component: short description",
-        "",
-        "Optional body.",
-        "",
-        "Co-authored-by: <Model Full Name> <email>",
-        "```",
-      ].join("\n"),
-    );
-  }
+  // Explicit instruction: do NOT commit
+  sections.push(
+    [
+      "## Important",
+      "",
+      "Do NOT run `git commit`. The orchestrator will handle committing",
+      "your changes after they pass quality checks.",
+    ].join("\n"),
+  );
 
   return sections.join("\n\n");
 }
