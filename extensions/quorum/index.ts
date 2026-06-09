@@ -221,6 +221,14 @@ export default function (pi: ExtensionAPI) {
         const results: ReviewerResult[] = new Array(reviewers.length);
         let completed = 0;
 
+        const emitProgress = (message: string) => {
+          ctx.ui.setStatus("quorum", message);
+          // Structured stderr progress for kuma (only in --output mode)
+          if (outputPath) {
+            console.error(`[kuma:progress] ${message}`);
+          }
+        };
+
         await runWithConcurrency(
           reviewers,
           MAX_CONCURRENCY,
@@ -242,8 +250,7 @@ export default function (pi: ExtensionAPI) {
             };
 
             completed++;
-            ctx.ui.setStatus(
-              "quorum",
+            emitProgress(
               `Quorum: ${completed}/${reviewers.length} reviewers complete`,
             );
             ctx.ui.notify(
