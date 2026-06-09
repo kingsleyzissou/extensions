@@ -4,7 +4,7 @@ import type { EventHandler, PacifistaConfig, PiResult } from "./types.ts";
 import type { GateHandler } from "./runner.ts";
 import { piCapture, piReview } from "./pi.ts";
 import { buildFixPrompt, buildTriagePrompt } from "./prompt.ts";
-import { runQualityChecks } from "./qc.ts";
+import { runChecks } from "./checks.ts";
 
 export type TriageVerdict = {
   id: number;
@@ -112,14 +112,14 @@ export async function runReviewStage(
       continue;
     }
 
-    const qc = await runQualityChecks(worktreePath, config.qc);
+    const checksResult = await runChecks(worktreePath, config.checks, "task");
 
     if (onGate) {
       const action = await onGate(
         { id: fix.id, title: fix.description, body: "", fields: {} },
         1,
         [],
-        qc,
+        checksResult,
         config.gate,
       );
       if (action.action === "approve") {

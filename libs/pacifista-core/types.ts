@@ -16,7 +16,7 @@ export type PlanTask = {
 // ── Config types ────────────────────────────────────────────────────────
 
 export type PacifistaConfig = {
-  qc: QcConfig;
+  checks: Check[];
   pi: PiConfig;
   hooks: Hooks;
   prompt: PromptConfig;
@@ -24,10 +24,10 @@ export type PacifistaConfig = {
   gate: GateConfig;
 };
 
-export type QcConfig = {
-  lint: string;
-  typecheck: string;
-  testCmd: string;
+export type Check = {
+  name: string;
+  command: string;
+  scope?: "task" | "final" | "both";
 };
 
 export type PiConfig = {
@@ -36,9 +36,10 @@ export type PiConfig = {
 };
 
 export type Hooks = {
+  beforeRun?: (ctx: RunContext) => Promise<void>;
   beforeTask?: (task: PlanTask, ctx: RunContext) => Promise<void>;
   afterTask?: (task: PlanTask, result: TaskResult, ctx: RunContext) => Promise<void>;
-  beforeQc?: (task: PlanTask, ctx: RunContext) => Promise<void>;
+  beforeChecks?: (task: PlanTask, ctx: RunContext) => Promise<void>;
   onApprove?: (task: PlanTask, ctx: RunContext) => Promise<void>;
 };
 
@@ -54,7 +55,7 @@ export type ReviewConfig = {
 };
 
 export type GateConfig = {
-  autoApprove: boolean | ((task: PlanTask, qc: QcResult) => boolean);
+  autoApprove: boolean | ((task: PlanTask, result: ChecksResult) => boolean);
 };
 
 // ── State types ─────────────────────────────────────────────────────────
@@ -77,17 +78,21 @@ export type TaskState = {
 export type Attempt = {
   startedAt: string;
   completedAt?: string;
-  qc?: QcResult;
+  checks?: ChecksResult;
   changedFiles?: string[];
   outcome?: "approved" | "revise" | "rejected";
   revision?: string;
 };
 
-export type QcResult = {
-  lint: "pass" | "fail";
-  typecheck: "pass" | "fail";
-  tests: { status: "pass" | "fail" | "skipped"; files: number };
-  missingTests?: string[];
+export type CheckResult = {
+  name: string;
+  status: "pass" | "fail";
+  output?: string;
+};
+
+export type ChecksResult = {
+  checks: CheckResult[];
+  passed: boolean;
 };
 
 // ── Runner types ────────────────────────────────────────────────────────
@@ -113,13 +118,22 @@ export type RunResult = {
 export type TaskResult = {
   exitCode: number;
   changedFiles: string[];
-  qc?: QcResult;
+  checksResult?: ChecksResult;
+};
+
+export type ExecResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
 };
 
 export type RunContext = {
   worktreePath: string;
   config: PacifistaConfig;
   state: RunState;
+  /** Run a shell command with captured output. Output is emitted
+   *  to the TUI as subtle, padded text. */
+  exec: (command: string, opts?: { cwd?: string }) => Promise<ExecResult>;
 };
 
 // ── Pi types ────────────────────────────────────────────────────────────
@@ -147,18 +161,24 @@ export type GateAction =
 
 export type PacifistaEvent =
   | { type: "plan:loaded"; plan: Plan }
+  | { type: "setup:start"; command: string }
+  | { type: "setup:output"; text: string }
+  | { type: "setup:done"; ok: boolean }
   | { type: "task:start"; task: PlanTask; attempt: number }
   | { type: "task:complete"; task: PlanTask; exitCode: number }
   | { type: "tool:start"; toolName: string; args: Record<string, unknown> }
   | { type: "tool:end"; toolName: string; isError: boolean }
   | { type: "agent:thinking" }
-  | { type: "qc:start" }
-  | { type: "qc:done"; result: QcResult }
-  | { type: "gate:needed"; task: PlanTask; attempt: number; changedFiles: string[]; qc: QcResult }
+  | { type: "checks:start" }
+  | { type: "checks:done"; result: ChecksResult }
+  | { type: "gate:needed"; task: PlanTask; attempt: number; changedFiles: string[]; checksResult: ChecksResult }
   | { type: "task:approved"; task: PlanTask }
   | { type: "task:rejected"; task: PlanTask }
   | { type: "task:skipped"; task: PlanTask }
   | { type: "run:summary"; result: RunResult }
+  | { type: "final-checks:start" }
+  | { type: "final-checks:done"; result: ChecksResult }
+  | { type: "final-checks:failed"; result: ChecksResult }
   | { type: "review:start" }
   | { type: "review:done"; fixes: number }
   | { type: "state:saved" }
