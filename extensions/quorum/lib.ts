@@ -74,7 +74,7 @@ export const REVIEWERS: ReviewerDef[] = [
 
 export const REVIEWER_PROVIDER = "vertex-anthropic";
 export const REVIEWER_MODEL = "claude-sonnet-4-6";
-export const REVIEWER_TOOLS = ["read", "grep", "find", "ls", "bash"];
+export const REVIEWER_TOOLS = ["read"];
 export const MAX_CONCURRENCY = 4;
 
 // --- Helpers ---
