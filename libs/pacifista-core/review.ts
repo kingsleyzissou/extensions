@@ -1,10 +1,22 @@
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
-import type { EventHandler, PacifistaConfig, PiResult } from "./types.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { unlink } from "node:fs/promises";
+import type { EventHandler, PacifistaConfig, ReviewData, TriageVerdictData } from "./types.ts";
 import type { GateHandler } from "./runner.ts";
-import { piCapture, piReview } from "./pi.ts";
+import { piCapture, piCaptureWithSession, piReview } from "./pi.ts";
 import { buildFixPrompt, buildTriagePrompt } from "./prompt.ts";
 import { runChecks } from "./checks.ts";
+import { appendEvent } from "./state.ts";
+
+/**
+ * Review and triage run without a sandbox.
+ *
+ * The review stage writes structured JSON to a temp file on the host.
+ * If pi spawns inside a container, the file lands in the container's
+ * `/tmp` and the host can't read it. Force `--no-container` so quorum
+ * and triage both read from the host filesystem.
+ */
+const REVIEW_PI_OPTS = { sandbox: false, noSandbox: true } as const;
 
 export type TriageVerdict = {
   id: number;
@@ -42,7 +54,7 @@ async function isQuorumAvailable(worktreePath: string): Promise<boolean> {
 export async function runReviewStage(
   worktreePath: string,
   config: PacifistaConfig,
-  planName: string,
+  journalPath: string | undefined,
   onEvent?: EventHandler,
   onGate?: GateHandler,
 ): Promise<{ reviewed: boolean; fixes: number }> {
@@ -51,35 +63,43 @@ export async function runReviewStage(
   }
 
   const baseBranch = config.review.baseBranch;
-  const piOpts = { sandbox: config.pi.sandbox, noSandbox: config.pi.noSandbox };
   const hasQuorum = await isQuorumAvailable(worktreePath);
 
   onEvent?.({ type: "review:start" });
+  onEvent?.({ type: "review:reviewing" });
 
-  const reviewResult: PiResult = await piReview(baseBranch, worktreePath, piOpts);
+  // Write structured JSON output to a temp file via quorum's --output flag
+  const outputPath = join(tmpdir(), `kuma-review-${Date.now()}.json`);
+
+  const reviewResult = await piReview(baseBranch, worktreePath, {
+    ...REVIEW_PI_OPTS,
+    outputPath,
+  }, onEvent);
 
   if (reviewResult.exitCode !== 0) {
     onEvent?.({ type: "error", message: `Review failed: ${reviewResult.stderr}` });
     return { reviewed: false, fixes: 0 };
   }
 
-  // Save review output
-  const reviewsDir = config.review.reviewsDir ?? "docs/reviews";
-  const date = new Date().toISOString().slice(0, 10);
-  const slug = planName
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-  const reviewPath = `${reviewsDir}/${date}-${slug}-review.md`;
-
-  await mkdir(dirname(`${worktreePath}/${reviewPath}`), { recursive: true });
-  await Bun.write(`${worktreePath}/${reviewPath}`, reviewResult.stdout);
+  // Read structured review data
+  let reviewData: ReviewData;
+  try {
+    const outputFile = Bun.file(outputPath);
+    reviewData = await outputFile.json() as ReviewData;
+  } catch {
+    onEvent?.({ type: "error", message: "Failed to read review output" });
+    return { reviewed: false, fixes: 0 };
+  } finally {
+    await unlink(outputPath).catch(() => {});
+  }
 
   // Triage
-  const triageResult = await piCapture(
-    buildTriagePrompt(reviewPath),
+  onEvent?.({ type: "review:triage" });
+
+  const triageResult = await piCaptureWithSession(
+    buildTriagePrompt(reviewData),
     worktreePath,
-    piOpts,
+    { ...REVIEW_PI_OPTS, noTools: true },
   );
 
   if (triageResult.exitCode !== 0) {
@@ -90,6 +110,18 @@ export async function runReviewStage(
   const verdicts = parseVerdicts(triageResult.stdout);
   const fixes = verdicts.filter((v) => v.verdict === "fix");
 
+  // Save review data and verdicts to journal (if one exists)
+  if (journalPath) {
+    await appendEvent(journalPath, {
+      type: "review:completed",
+      reviewData,
+      verdicts: verdicts as TriageVerdictData[],
+      reviewSessionId: reviewResult.sessionId,
+      triageSessionId: triageResult.sessionId,
+      ts: new Date().toISOString(),
+    });
+  }
+
   if (fixes.length === 0) {
     onEvent?.({ type: "review:done", fixes: 0 });
     return { reviewed: true, fixes: 0 };
@@ -98,13 +130,16 @@ export async function runReviewStage(
   // Apply fixes
   let appliedFixes = 0;
 
-  for (const fix of fixes) {
+  for (let i = 0; i < fixes.length; i++) {
+    const fix = fixes[i]!;
     if (!fix.sha) continue;
+
+    onEvent?.({ type: "review:fix", current: i + 1, total: fixes.length, description: fix.description });
 
     const fixResult = await piCapture(
       buildFixPrompt(fix.description, fix.sha),
       worktreePath,
-      piOpts,
+      REVIEW_PI_OPTS,
     );
 
     if (fixResult.exitCode !== 0) {
@@ -146,13 +181,50 @@ export async function runReviewStage(
   return { reviewed: true, fixes: appliedFixes };
 }
 
+/**
+ * Extract the outer JSON array from triage output.
+ *
+ * Uses a bracket-depth counter instead of regex to correctly handle
+ * nested arrays/objects (e.g. `"tags": []`) that would cause a
+ * non-greedy regex `\[...*?\]` to stop at the first `]`.
+ */
+function extractJsonArray(text: string): string | null {
+  const start = text.indexOf("[");
+  if (start === -1) return null;
+
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "[" || ch === "{") depth++;
+    else if (ch === "]" || ch === "}") depth--;
+
+    if (depth === 0) {
+      return text.slice(start, i + 1);
+    }
+  }
+
+  return null; // unbalanced brackets
+}
+
 function parseVerdicts(output: string): TriageVerdict[] {
-  const jsonMatch = output.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return [];
+  // Strip markdown code fences before matching
+  const stripped = output.replace(/```(?:json)?\s*\n?/g, "");
+
+  const jsonStr = extractJsonArray(stripped);
+  if (!jsonStr) {
+    console.warn("[pacifista] parseVerdicts: no JSON array found in triage output");
+    return [];
+  }
 
   try {
-    return JSON.parse(jsonMatch[0]) as TriageVerdict[];
-  } catch {
+    const parsed: unknown = JSON.parse(jsonStr);
+    if (!Array.isArray(parsed)) {
+      console.warn("[pacifista] parseVerdicts: parsed value is not an array");
+      return [];
+    }
+    return parsed as TriageVerdict[];
+  } catch (err) {
+    console.warn(`[pacifista] parseVerdicts: JSON parse failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }

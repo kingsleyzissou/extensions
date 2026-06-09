@@ -68,6 +68,7 @@ export type JournalEvent =
   | { type: "task:revised"; taskId: number; attempt: number; feedback: string; ts: string }
   | { type: "task:rejected"; taskId: number; attempt: number; stop: boolean; ts: string }
   | { type: "task:skipped"; taskId: number; ts: string }
+  | { type: "review:completed"; reviewData: ReviewData; verdicts: TriageVerdictData[]; reviewSessionId?: string; triageSessionId?: string; ts: string }
   | { type: "run:paused"; ts: string }
   | { type: "run:completed"; ts: string };
 
@@ -79,6 +80,10 @@ export type RunState = {
   startedAt: string;
   currentTask: number;
   tasks: TaskState[];
+  /** Session ID from the review (quorum) agent, if review completed. */
+  reviewSessionId?: string;
+  /** Session ID from the triage agent, if review completed. */
+  triageSessionId?: string;
 };
 
 export type TaskState = {
@@ -157,9 +162,14 @@ export type PiResult = {
   stderr: string;
 };
 
+export type PiCaptureResult = PiResult & {
+  sessionId?: string;
+};
+
 export type PiExecOptions = {
   sandbox?: boolean;
   noSandbox?: boolean;
+  noTools?: boolean;
 };
 
 // ── Gate types ──────────────────────────────────────────────────────────
@@ -193,6 +203,9 @@ export type PacifistaEvent =
   | { type: "final-checks:done"; result: ChecksResult }
   | { type: "final-checks:failed"; result: ChecksResult }
   | { type: "review:start" }
+  | { type: "review:reviewing"; message?: string }
+  | { type: "review:triage" }
+  | { type: "review:fix"; current: number; total: number; description: string }
   | { type: "review:done"; fixes: number }
   | { type: "state:saved" }
   | { type: "error"; message: string };
@@ -203,4 +216,26 @@ export type EventHandler = (event: PacifistaEvent) => void;
 
 export type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
+};
+
+// ── Review types ────────────────────────────────────────────────────────
+
+export type ReviewData = {
+  baseBranch: string;
+  projectType: string;
+  commitCount: number;
+  reviewers: {
+    name: string;
+    label: string;
+    output: string;
+    exitCode: number;
+    error?: string;
+  }[];
+};
+
+export type TriageVerdictData = {
+  id: number;
+  verdict: "fix" | "defer" | "pushback";
+  sha?: string;
+  description: string;
 };

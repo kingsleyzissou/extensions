@@ -293,7 +293,7 @@ export async function runPlan(
     await runReviewStage(
       options.worktreePath,
       config,
-      plan.title,
+      journalPath,
       onEvent,
       onGate,
     );

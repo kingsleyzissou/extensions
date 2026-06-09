@@ -250,6 +250,17 @@ function applyEvent(
       return state;
     }
 
+    case "review:completed": {
+      if (!state) return state;
+      if (event.reviewSessionId) {
+        state.reviewSessionId = event.reviewSessionId;
+      }
+      if (event.triageSessionId) {
+        state.triageSessionId = event.triageSessionId;
+      }
+      return state;
+    }
+
     case "run:paused":
     case "run:completed":
       return state;
