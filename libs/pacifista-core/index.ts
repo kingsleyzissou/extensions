@@ -2,11 +2,12 @@
 export { runPlan } from "./runner.ts";
 export { parsePlan } from "./plan.ts";
 export { loadConfig } from "./config.ts";
-export { loadState, saveState, createState, getStatePath } from "./state.ts";
+export { appendEvent, replayState, journalExists, getJournalPath } from "./state.ts";
 export { piStream, piCapture, piReview } from "./pi.ts";
 export { buildTaskPrompt, buildTriagePrompt, buildFixPrompt } from "./prompt.ts";
 export { runChecks } from "./checks.ts";
 export { runReviewStage } from "./review.ts";
+export { detectBareRepoRoot } from "./git.ts";
 
 // Types
 export type {
@@ -25,6 +26,7 @@ export type {
   CheckResult,
   ChecksResult,
   ExecResult,
+  JournalEvent,
   RunOptions,
   RunResult,
   TaskResult,

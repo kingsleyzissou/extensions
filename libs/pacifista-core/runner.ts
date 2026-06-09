@@ -1,5 +1,4 @@
 import type {
-  Attempt,
   EventHandler,
   ExecResult,
   ChecksResult,
@@ -14,7 +13,7 @@ import type {
 } from "./types.ts";
 import { loadConfig } from "./config.ts";
 import { parsePlan } from "./plan.ts";
-import { createState, getStatePath, loadState, saveState } from "./state.ts";
+import { appendEvent, getJournalPath, journalExists, replayState } from "./state.ts";
 import { piStream } from "./pi.ts";
 import { buildTaskPrompt } from "./prompt.ts";
 import { runChecks } from "./checks.ts";
@@ -43,7 +42,6 @@ export async function runPlan(
   const config = await loadConfig(
     options.worktreePath,
     options.configOverrides,
-    options.projectRoot,
   );
 
   const planMarkdown = await Bun.file(options.planPath).text();
@@ -51,10 +49,8 @@ export async function runPlan(
 
   onEvent({ type: "plan:loaded", plan });
 
-  // State lives at project root, not inside the worktree
-  const stateRoot = options.projectRoot ?? options.worktreePath;
-  const statePath = getStatePath(stateRoot);
-  const state = await loadOrCreateState(statePath, options, plan);
+  const journalPath = await getJournalPath(options.worktreePath);
+  const state = await loadOrCreateState(journalPath, options, plan);
 
   const ctx: RunContext = {
     worktreePath: options.worktreePath,
@@ -104,27 +100,31 @@ export async function runPlan(
       continue;
     }
 
-    state.currentTask = task.id;
-    taskState.status = "in_progress";
-    await saveState(statePath, state);
-
     let approved = false;
     let revision: string | undefined;
     const maxAttempts = options.maxAttempts ?? 5;
 
     while (!approved) {
-      if (taskState.attempts.length >= maxAttempts) {
-        taskState.status = "rejected";
+      // Re-resolve after replays from prior iterations
+      const currentTask = state.tasks.find((t) => t.id === task.id)!;
+      const attemptNum = currentTask.attempts.length + 1;
+
+      if (attemptNum > maxAttempts) {
         onEvent({
           type: "error",
           message: `Task ${task.id} exceeded maximum attempts (${maxAttempts})`,
         });
-        await saveState(statePath, state);
+        await appendEvent(journalPath, {
+          type: "task:rejected",
+          taskId: task.id,
+          attempt: attemptNum - 1,
+          stop: false,
+          ts: new Date().toISOString(),
+        });
         break;
       }
 
-      const attempt: Attempt = { startedAt: new Date().toISOString() };
-      taskState.attempts.push(attempt);
+      const ts = new Date().toISOString();
 
       // Hook: beforeTask
       if (config.hooks.beforeTask) {
@@ -139,8 +139,18 @@ export async function runPlan(
       onEvent({
         type: "task:start",
         task,
-        attempt: taskState.attempts.length,
+        attempt: attemptNum,
       });
+
+      await appendEvent(journalPath, {
+        type: "task:started",
+        taskId: task.id,
+        attempt: attemptNum,
+        ts,
+      });
+
+      // Replay to keep in-memory state current
+      Object.assign(state, await replayState(journalPath));
 
       const result = await piStream(
         prompt,
@@ -157,7 +167,6 @@ export async function runPlan(
 
       // Detect changed files
       const changedFiles = await getChangedFiles(options.worktreePath);
-      attempt.changedFiles = changedFiles;
 
       // Hook: beforeChecks
       if (config.hooks.beforeChecks) {
@@ -167,9 +176,15 @@ export async function runPlan(
       // Checks
       onEvent({ type: "checks:start" });
       const checksResult = await runChecks(options.worktreePath, config.checks, "task");
-      attempt.checks = checksResult;
-      attempt.completedAt = new Date().toISOString();
-      await saveState(statePath, state);
+
+      await appendEvent(journalPath, {
+        type: "task:checked",
+        taskId: task.id,
+        attempt: attemptNum,
+        checksResult,
+        changedFiles,
+        ts: new Date().toISOString(),
+      });
 
       onEvent({ type: "checks:done", result: checksResult });
 
@@ -177,70 +192,90 @@ export async function runPlan(
       onEvent({
         type: "gate:needed",
         task,
-        attempt: taskState.attempts.length,
+        attempt: attemptNum,
         changedFiles,
         checksResult,
       });
 
       const action = await onGate(
         task,
-        taskState.attempts.length,
+        attemptNum,
         changedFiles,
         checksResult,
         config.gate,
       );
 
       switch (action.action) {
-        case "approve":
-          attempt.outcome = "approved";
-          taskState.status = "approved";
-          approved = true;
-
+        case "approve": {
           // Commit on the host (not inside sandbox)
+          let commitSha: string | undefined;
           if (options.commitPerTask) {
             const commitMsg = buildCommitMessage(task);
-            await commitChanges(options.worktreePath, commitMsg);
+            commitSha = await commitChanges(options.worktreePath, commitMsg);
           }
 
+          await appendEvent(journalPath, {
+            type: "task:approved",
+            taskId: task.id,
+            attempt: attemptNum,
+            commitSha,
+            ts: new Date().toISOString(),
+          });
+
+          approved = true;
           onEvent({ type: "task:approved", task });
           if (config.hooks.onApprove) {
             await config.hooks.onApprove(task, ctx);
           }
           break;
+        }
 
         case "revise":
-          attempt.outcome = "revise";
-          attempt.revision = action.feedback;
+          await appendEvent(journalPath, {
+            type: "task:revised",
+            taskId: task.id,
+            attempt: attemptNum,
+            feedback: action.feedback,
+            ts: new Date().toISOString(),
+          });
           revision = action.feedback;
           break;
 
         case "reject":
-          attempt.outcome = "rejected";
-          taskState.status = "rejected";
+          await appendEvent(journalPath, {
+            type: "task:rejected",
+            taskId: task.id,
+            attempt: attemptNum,
+            stop: action.stop,
+            ts: new Date().toISOString(),
+          });
+
           approved = true;
           onEvent({ type: "task:rejected", task });
           if (action.stop) {
-            await saveState(statePath, state);
-            return buildResult(state);
+            return buildResult(await replayState(journalPath));
           }
           break;
 
         case "quit":
-          await saveState(statePath, state);
+          await appendEvent(journalPath, {
+            type: "run:paused",
+            ts: new Date().toISOString(),
+          });
           onEvent({ type: "state:saved" });
-          return buildResult(state);
+          return buildResult(await replayState(journalPath));
       }
 
       // Hook: afterTask
       if (config.hooks.afterTask) {
+        // Replay to get latest state for the hook
+        Object.assign(state, await replayState(journalPath));
         await config.hooks.afterTask(
           task,
           { exitCode: result.exitCode, changedFiles, checksResult },
           ctx,
         );
       }
-
-      await saveState(statePath, state);
     }
   }
 
@@ -264,7 +299,13 @@ export async function runPlan(
     );
   }
 
-  const result = buildResult(state);
+  await appendEvent(journalPath, {
+    type: "run:completed",
+    ts: new Date().toISOString(),
+  });
+
+  const finalState = await replayState(journalPath);
+  const result = buildResult(finalState);
   onEvent({ type: "run:summary", result });
   return result;
 }
@@ -272,15 +313,24 @@ export async function runPlan(
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 async function loadOrCreateState(
-  statePath: string,
+  journalPath: string,
   options: RunOptions,
   plan: Plan,
-) {
-  const stateFile = Bun.file(statePath);
-  if (await stateFile.exists()) {
-    return loadState(statePath);
+): Promise<RunState> {
+  if (await journalExists(journalPath)) {
+    return replayState(journalPath);
   }
-  return createState(options.planPath, options.worktreePath, plan.tasks);
+
+  // New run — write the initial event
+  await appendEvent(journalPath, {
+    type: "run:started",
+    planPath: options.planPath,
+    worktreePath: options.worktreePath,
+    ts: new Date().toISOString(),
+    tasks: plan.tasks.map((t) => ({ id: t.id, title: t.title })),
+  });
+
+  return replayState(journalPath);
 }
 
 async function getChangedFiles(workdir: string): Promise<string[]> {
@@ -324,11 +374,13 @@ function buildCommitMessage(task: PlanTask): string {
  *
  * Runs outside the sandbox so the user's git config, GPG keys,
  * and signing preferences are all available.
+ *
+ * Returns the commit SHA on success, undefined if nothing to commit.
  */
 async function commitChanges(
   workdir: string,
   message: string,
-): Promise<void> {
+): Promise<string | undefined> {
   const add = Bun.spawn(["git", "add", "-A"], {
     cwd: workdir,
     stdout: "pipe",
@@ -349,7 +401,8 @@ async function commitChanges(
 
   // Read stderr before awaiting exit — the pipe data can be
   // lost if the process exits before we start reading.
-  const [stderr, exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(commit.stdout).text(),
     new Response(commit.stderr).text(),
     commit.exited,
   ]);
@@ -360,7 +413,12 @@ async function commitChanges(
     if (!stderr.includes("nothing to commit")) {
       throw new Error(`git commit failed (exit ${exitCode}): ${stderr}`);
     }
+    return undefined;
   }
+
+  // Extract short SHA from commit output, e.g. "[branch abc1234] message"
+  const shaMatch = stdout.match(/\[\S+\s+([a-f0-9]+)\]/);
+  return shaMatch?.[1];
 }
 
 async function execCapture(
