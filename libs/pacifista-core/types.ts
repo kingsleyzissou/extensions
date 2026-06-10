@@ -17,6 +17,8 @@ export type PlanTask = {
 
 export type PacifistaConfig = {
   checks: Check[];
+  /** Command to run before staging commits (e.g. `npm run format`). */
+  format?: string;
   pi: PiConfig;
   hooks: Hooks;
   prompt: PromptConfig;

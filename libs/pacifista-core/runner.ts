@@ -149,6 +149,10 @@ export async function runPlan(
       // Replay to keep in-memory state current
       Object.assign(state, await replayState(journalPath));
 
+      // Capture HEAD before the agent runs so we can diff against it
+      // even if the agent commits (despite being told not to).
+      const preTaskHead = await getHead(options.worktreePath);
+
       const result = await piStream(
         prompt,
         options.worktreePath,
@@ -173,8 +177,9 @@ export async function runPlan(
         exitCode: result.exitCode,
       });
 
-      // Detect changed files
-      const changedFiles = await getChangedFiles(options.worktreePath);
+      // Detect changed files — diff against the pre-task HEAD in case
+      // the agent committed despite instructions not to.
+      const changedFiles = await getChangedFiles(options.worktreePath, preTaskHead);
 
       // Hook: beforeChecks
       if (config.hooks.beforeChecks) {
@@ -213,7 +218,7 @@ export async function runPlan(
           let commitSha: string | undefined;
           if (options.commitPerTask) {
             const commitMsg = buildCommitMessage(task);
-            commitSha = await commitChanges(options.worktreePath, commitMsg);
+            commitSha = await commitChanges(options.worktreePath, commitMsg, config.format);
           }
 
           await appendEvent(journalPath, {
@@ -329,19 +334,49 @@ async function loadOrCreateState(
   return replayState(journalPath);
 }
 
-async function getChangedFiles(workdir: string): Promise<string[]> {
-  const proc = Bun.spawn(['git', 'diff', '--name-only', 'HEAD'], {
+async function getHead(workdir: string): Promise<string> {
+  const proc = Bun.spawn(['git', 'rev-parse', 'HEAD'], {
     cwd: workdir,
     stdout: 'pipe',
     stderr: 'pipe',
   });
   const stdout = await new Response(proc.stdout).text();
   await proc.exited;
+  return stdout.trim();
+}
 
-  return stdout
-    .split('\n')
-    .map(f => f.trim())
-    .filter(Boolean);
+async function getChangedFiles(workdir: string, base?: string): Promise<string[]> {
+  const ref = base ?? 'HEAD';
+
+  // Modified/deleted tracked files
+  const diff = Bun.spawn(['git', 'diff', '--name-only', ref], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const diffOut = await new Response(diff.stdout).text();
+  await diff.exited;
+
+  // New untracked files (e.g. .prettierrc, new source files)
+  const untracked = Bun.spawn(['git', 'ls-files', '--others', '--exclude-standard'], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const untrackedOut = await new Response(untracked.stdout).text();
+  await untracked.exited;
+
+  const files = new Set<string>();
+  for (const f of diffOut.split('\n')) {
+    const trimmed = f.trim();
+    if (trimmed) files.add(trimmed);
+  }
+  for (const f of untrackedOut.split('\n')) {
+    const trimmed = f.trim();
+    if (trimmed) files.add(trimmed);
+  }
+
+  return [...files];
 }
 
 /**
@@ -374,7 +409,20 @@ function buildCommitMessage(task: PlanTask): string {
  *
  * Returns the commit SHA on success, undefined if nothing to commit.
  */
-async function commitChanges(workdir: string, message: string): Promise<string | undefined> {
+async function commitChanges(
+  workdir: string,
+  message: string,
+  formatCmd?: string,
+): Promise<string | undefined> {
+  // Run formatter before staging so commit hooks have nothing to change
+  if (formatCmd) {
+    Bun.spawnSync(['sh', '-c', formatCmd], {
+      cwd: workdir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+  }
+
   const add = Bun.spawn(['git', 'add', '-A'], {
     cwd: workdir,
     stdout: 'pipe',
