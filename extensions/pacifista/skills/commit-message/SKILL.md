@@ -28,15 +28,15 @@ Optional body explaining why, not what.
 Use the component, module, or area of the codebase that the change
 primarily touches. Examples:
 
-| Prefix       | Use for                                   |
-| ------------ | ----------------------------------------- |
-| `tests:`     | Unit test changes                         |
-| `e2e:`       | End-to-end test changes                   |
-| `api:`       | API code or endpoints                     |
-| `ci:`        | CI/CD workflows                           |
-| `deps:`      | Dependency updates (manual)               |
-| `devDeps:`   | Dev dependency updates (manual)           |
-| `src:`       | Cross-cutting changes across multiple areas |
+| Prefix     | Use for                                     |
+| ---------- | ------------------------------------------- |
+| `tests:`   | Unit test changes                           |
+| `e2e:`     | End-to-end test changes                     |
+| `api:`     | API code or endpoints                       |
+| `ci:`      | CI/CD workflows                             |
+| `deps:`    | Dependency updates (manual)                 |
+| `devDeps:` | Dev dependency updates (manual)             |
+| `src:`     | Cross-cutting changes across multiple areas |
 
 For dependency bumps from bots (Dependabot, Renovate), the bot format is
 acceptable as-is.
@@ -77,13 +77,13 @@ Skip the body for self-explanatory changes:
 
 ## Common Mistakes
 
-| Mistake                     | Fix                                      |
-| --------------------------- | ---------------------------------------- |
-| `feat(wizard): add feature` | `Wizard: add feature`                    |
-| `fix: broken button`        | `Button: fix broken button`              |
-| `chore(deps): update X`     | `deps: update X`                         |
+| Mistake                     | Fix                                         |
+| --------------------------- | ------------------------------------------- |
+| `feat(wizard): add feature` | `Wizard: add feature`                       |
+| `fix: broken button`        | `Button: fix broken button`                 |
+| `chore(deps): update X`     | `deps: update X`                            |
 | `Added new component`       | `Component: add new component` (imperative) |
-| Body repeats subject        | Remove body or expand with reasoning     |
+| Body repeats subject        | Remove body or expand with reasoning        |
 
 ## Agentic Workflows
 

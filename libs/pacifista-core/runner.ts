@@ -10,14 +10,14 @@ import type {
   RunOptions,
   RunResult,
   RunState,
-} from "./types.ts";
-import { loadConfig } from "./config.ts";
-import { parsePlan } from "./plan.ts";
-import { appendEvent, getJournalPath, journalExists, replayState } from "./state.ts";
-import { piStream } from "./pi.ts";
-import { buildTaskPrompt } from "./prompt.ts";
-import { runChecks } from "./checks.ts";
-import { runReviewStage } from "./review.ts";
+} from './types.ts';
+import { loadConfig } from './config.ts';
+import { parsePlan } from './plan.ts';
+import { appendEvent, getJournalPath, journalExists, replayState } from './state.ts';
+import { piStream } from './pi.ts';
+import { buildTaskPrompt } from './prompt.ts';
+import { runChecks } from './checks.ts';
+import { runReviewStage } from './review.ts';
 
 export type GateHandler = (
   task: PlanTask,
@@ -39,15 +39,12 @@ export async function runPlan(
   onEvent: EventHandler,
   onGate: GateHandler,
 ): Promise<RunResult> {
-  const config = await loadConfig(
-    options.worktreePath,
-    options.configOverrides,
-  );
+  const config = await loadConfig(options.worktreePath, options.configOverrides);
 
   const planMarkdown = await Bun.file(options.planPath).text();
   const plan: Plan = parsePlan(planMarkdown);
 
-  onEvent({ type: "plan:loaded", plan });
+  onEvent({ type: 'plan:loaded', plan });
 
   const journalPath = await getJournalPath(options.worktreePath);
   const state = await loadOrCreateState(journalPath, options, plan);
@@ -57,13 +54,10 @@ export async function runPlan(
     config,
     state,
     exec: async (command, opts) => {
-      const result = await execCapture(
-        command,
-        opts?.cwd ?? options.worktreePath,
-      );
+      const result = await execCapture(command, opts?.cwd ?? options.worktreePath);
       const output = (result.stdout + result.stderr).trim();
       if (output) {
-        onEvent({ type: "setup:output", text: output });
+        onEvent({ type: 'setup:output', text: output });
       }
       return result;
     },
@@ -73,18 +67,18 @@ export async function runPlan(
   // Skipped on resume when tasks have already been completed.
   const startFrom = options.startFromTask ?? 1;
   const hasCompletedTasks = state.tasks.some(
-    (t) => t.status === "approved" || t.status === "skipped",
+    t => t.status === 'approved' || t.status === 'skipped',
   );
 
   if (config.hooks.beforeRun && !hasCompletedTasks) {
-    onEvent({ type: "setup:start", command: "beforeRun" });
+    onEvent({ type: 'setup:start', command: 'beforeRun' });
     try {
       await config.hooks.beforeRun(ctx);
-      onEvent({ type: "setup:done", ok: true });
+      onEvent({ type: 'setup:done', ok: true });
     } catch (err) {
-      onEvent({ type: "setup:done", ok: false });
+      onEvent({ type: 'setup:done', ok: false });
       onEvent({
-        type: "error",
+        type: 'error',
         message: `beforeRun hook failed: ${err instanceof Error ? err.message : String(err)}`,
       });
       return buildResult(state);
@@ -94,9 +88,9 @@ export async function runPlan(
   for (const task of plan.tasks) {
     if (task.id < startFrom) continue;
 
-    const taskState = state.tasks.find((t) => t.id === task.id);
+    const taskState = state.tasks.find(t => t.id === task.id);
     if (!taskState) continue;
-    if (taskState.status === "approved" || taskState.status === "skipped") {
+    if (taskState.status === 'approved' || taskState.status === 'skipped') {
       continue;
     }
 
@@ -106,16 +100,16 @@ export async function runPlan(
 
     while (!approved) {
       // Re-resolve after replays from prior iterations
-      const currentTask = state.tasks.find((t) => t.id === task.id)!;
+      const currentTask = state.tasks.find(t => t.id === task.id)!;
       const attemptNum = currentTask.attempts.length + 1;
 
       if (attemptNum > maxAttempts) {
         onEvent({
-          type: "error",
+          type: 'error',
           message: `Task ${task.id} exceeded maximum attempts (${maxAttempts})`,
         });
         await appendEvent(journalPath, {
-          type: "task:rejected",
+          type: 'task:rejected',
           taskId: task.id,
           attempt: attemptNum - 1,
           stop: false,
@@ -137,13 +131,13 @@ export async function runPlan(
       });
 
       onEvent({
-        type: "task:start",
+        type: 'task:start',
         task,
         attempt: attemptNum,
       });
 
       await appendEvent(journalPath, {
-        type: "task:started",
+        type: 'task:started',
         taskId: task.id,
         attempt: attemptNum,
         ts,
@@ -160,7 +154,7 @@ export async function runPlan(
       );
 
       onEvent({
-        type: "task:complete",
+        type: 'task:complete',
         task,
         exitCode: result.exitCode,
       });
@@ -174,11 +168,11 @@ export async function runPlan(
       }
 
       // Checks
-      onEvent({ type: "checks:start" });
-      const checksResult = await runChecks(options.worktreePath, config.checks, "task");
+      onEvent({ type: 'checks:start' });
+      const checksResult = await runChecks(options.worktreePath, config.checks, 'task');
 
       await appendEvent(journalPath, {
-        type: "task:checked",
+        type: 'task:checked',
         taskId: task.id,
         attempt: attemptNum,
         checksResult,
@@ -186,27 +180,21 @@ export async function runPlan(
         ts: new Date().toISOString(),
       });
 
-      onEvent({ type: "checks:done", result: checksResult });
+      onEvent({ type: 'checks:done', result: checksResult });
 
       // Gate
       onEvent({
-        type: "gate:needed",
+        type: 'gate:needed',
         task,
         attempt: attemptNum,
         changedFiles,
         checksResult,
       });
 
-      const action = await onGate(
-        task,
-        attemptNum,
-        changedFiles,
-        checksResult,
-        config.gate,
-      );
+      const action = await onGate(task, attemptNum, changedFiles, checksResult, config.gate);
 
       switch (action.action) {
-        case "approve": {
+        case 'approve': {
           // Commit on the host (not inside sandbox)
           let commitSha: string | undefined;
           if (options.commitPerTask) {
@@ -215,7 +203,7 @@ export async function runPlan(
           }
 
           await appendEvent(journalPath, {
-            type: "task:approved",
+            type: 'task:approved',
             taskId: task.id,
             attempt: attemptNum,
             commitSha,
@@ -223,16 +211,16 @@ export async function runPlan(
           });
 
           approved = true;
-          onEvent({ type: "task:approved", task });
+          onEvent({ type: 'task:approved', task });
           if (config.hooks.onApprove) {
             await config.hooks.onApprove(task, ctx);
           }
           break;
         }
 
-        case "revise":
+        case 'revise':
           await appendEvent(journalPath, {
-            type: "task:revised",
+            type: 'task:revised',
             taskId: task.id,
             attempt: attemptNum,
             feedback: action.feedback,
@@ -241,9 +229,9 @@ export async function runPlan(
           revision = action.feedback;
           break;
 
-        case "reject":
+        case 'reject':
           await appendEvent(journalPath, {
-            type: "task:rejected",
+            type: 'task:rejected',
             taskId: task.id,
             attempt: attemptNum,
             stop: action.stop,
@@ -251,18 +239,18 @@ export async function runPlan(
           });
 
           approved = true;
-          onEvent({ type: "task:rejected", task });
+          onEvent({ type: 'task:rejected', task });
           if (action.stop) {
             return buildResult(await replayState(journalPath));
           }
           break;
 
-        case "quit":
+        case 'quit':
           await appendEvent(journalPath, {
-            type: "run:paused",
+            type: 'run:paused',
             ts: new Date().toISOString(),
           });
-          onEvent({ type: "state:saved" });
+          onEvent({ type: 'state:saved' });
           return buildResult(await replayState(journalPath));
       }
 
@@ -280,33 +268,27 @@ export async function runPlan(
   }
 
   // Final checks — run all checks scoped to "final" or "both".
-  onEvent({ type: "final-checks:start" });
-  const finalChecks = await runChecks(options.worktreePath, config.checks, "final");
+  onEvent({ type: 'final-checks:start' });
+  const finalChecks = await runChecks(options.worktreePath, config.checks, 'final');
   if (finalChecks.passed) {
-    onEvent({ type: "final-checks:done", result: finalChecks });
+    onEvent({ type: 'final-checks:done', result: finalChecks });
   } else {
-    onEvent({ type: "final-checks:failed", result: finalChecks });
+    onEvent({ type: 'final-checks:failed', result: finalChecks });
   }
 
   // Review stage
   if (!options.skipReview) {
-    await runReviewStage(
-      options.worktreePath,
-      config,
-      journalPath,
-      onEvent,
-      onGate,
-    );
+    await runReviewStage(options.worktreePath, config, journalPath, onEvent, onGate);
   }
 
   await appendEvent(journalPath, {
-    type: "run:completed",
+    type: 'run:completed',
     ts: new Date().toISOString(),
   });
 
   const finalState = await replayState(journalPath);
   const result = buildResult(finalState);
-  onEvent({ type: "run:summary", result });
+  onEvent({ type: 'run:summary', result });
   return result;
 }
 
@@ -323,27 +305,28 @@ async function loadOrCreateState(
 
   // New run — write the initial event
   await appendEvent(journalPath, {
-    type: "run:started",
+    type: 'run:started',
     planPath: options.planPath,
     worktreePath: options.worktreePath,
     ts: new Date().toISOString(),
-    tasks: plan.tasks.map((t) => ({ id: t.id, title: t.title })),
+    tasks: plan.tasks.map(t => ({ id: t.id, title: t.title })),
   });
 
   return replayState(journalPath);
 }
 
 async function getChangedFiles(workdir: string): Promise<string[]> {
-  const proc = Bun.spawn(
-    ["git", "diff", "--name-only", "HEAD"],
-    { cwd: workdir, stdout: "pipe", stderr: "pipe" },
-  );
+  const proc = Bun.spawn(['git', 'diff', '--name-only', 'HEAD'], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const stdout = await new Response(proc.stdout).text();
   await proc.exited;
 
   return stdout
-    .split("\n")
-    .map((f) => f.trim())
+    .split('\n')
+    .map(f => f.trim())
     .filter(Boolean);
 }
 
@@ -355,9 +338,9 @@ async function getChangedFiles(workdir: string): Promise<string[]> {
  */
 function buildCommitMessage(task: PlanTask): string {
   let msg: string;
-  if (task.fields["commit"]) {
+  if (task.fields['commit']) {
     // Strip surrounding backticks if present
-    msg = task.fields["commit"].replace(/^`|`$/g, "");
+    msg = task.fields['commit'].replace(/^`|`$/g, '');
   } else {
     // Fall back to the task title as-is — the plan-feature skill
     // should produce titles that work as commit subjects.
@@ -366,7 +349,7 @@ function buildCommitMessage(task: PlanTask): string {
 
   // Sanitize: take only the first line to prevent trailer injection
   // via embedded newlines (e.g. injecting Co-authored-by).
-  return msg.split("\n")[0]!.trim();
+  return msg.split('\n')[0]!.trim();
 }
 
 /**
@@ -377,14 +360,11 @@ function buildCommitMessage(task: PlanTask): string {
  *
  * Returns the commit SHA on success, undefined if nothing to commit.
  */
-async function commitChanges(
-  workdir: string,
-  message: string,
-): Promise<string | undefined> {
-  const add = Bun.spawn(["git", "add", "-A"], {
+async function commitChanges(workdir: string, message: string): Promise<string | undefined> {
+  const add = Bun.spawn(['git', 'add', '-A'], {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
   const addStderr = await new Response(add.stderr).text();
   const addExit = await add.exited;
@@ -393,10 +373,10 @@ async function commitChanges(
     throw new Error(`git add failed (exit ${addExit}): ${addStderr}`);
   }
 
-  const commit = Bun.spawn(["git", "commit", "-m", message], {
+  const commit = Bun.spawn(['git', 'commit', '-m', message], {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   // Read stderr before awaiting exit — the pipe data can be
@@ -410,7 +390,7 @@ async function commitChanges(
   if (exitCode !== 0) {
     // "nothing to commit" is not an error — the agent may not
     // have changed anything (e.g. on a revision that was a no-op).
-    if (!stderr.includes("nothing to commit")) {
+    if (!stderr.includes('nothing to commit')) {
       throw new Error(`git commit failed (exit ${exitCode}): ${stderr}`);
     }
     return undefined;
@@ -421,14 +401,11 @@ async function commitChanges(
   return shaMatch?.[1];
 }
 
-async function execCapture(
-  command: string,
-  cwd: string,
-): Promise<ExecResult> {
-  const proc = Bun.spawn(["sh", "-c", command], {
+async function execCapture(command: string, cwd: string): Promise<ExecResult> {
+  const proc = Bun.spawn(['sh', '-c', command], {
     cwd,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const [stdout, stderr] = await Promise.all([
@@ -442,7 +419,7 @@ async function execCapture(
 
 function buildResult(state: RunState): RunResult {
   return {
-    completed: state.tasks.filter((t) => t.status === "approved").length,
+    completed: state.tasks.filter(t => t.status === 'approved').length,
     total: state.tasks.length,
     tasks: state.tasks,
   };

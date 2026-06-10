@@ -1,8 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
-export type ProjectType = "frontend" | "backend-ts" | "go";
+export type ProjectType = 'frontend' | 'backend-ts' | 'go';
 
-export type ExecFn = ExtensionAPI["exec"];
+export type ExecFn = ExtensionAPI['exec'];
 
 export interface ReviewerDef {
   name: string;
@@ -20,9 +20,9 @@ export interface ReviewerResult {
 }
 
 export const PROJECT_LABELS: Record<ProjectType, string> = {
-  frontend: "React/TypeScript frontend",
-  "backend-ts": "TypeScript library",
-  go: "Go",
+  frontend: 'React/TypeScript frontend',
+  'backend-ts': 'TypeScript library',
+  go: 'Go',
 };
 
 /** Structured output written when /review --output is used. */

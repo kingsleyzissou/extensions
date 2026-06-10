@@ -1,4 +1,4 @@
-import type { Check, CheckResult, ChecksResult } from "./types.ts";
+import type { Check, CheckResult, ChecksResult } from './types.ts';
 
 /**
  * Allowlist pattern for check commands.
@@ -8,19 +8,31 @@ import type { Check, CheckResult, ChecksResult } from "./types.ts";
  * to limit the blast radius of a malicious config file.
  */
 const ALLOWED_CMD_PREFIXES = [
-  "npm ", "npm ", "npx ", "pnpm ", "yarn ", "bun ", "bunx ",
-  "make ", "node ", "tsc", "eslint", "prettier", "vitest", "jest",
+  'npm ',
+  'npm ',
+  'npx ',
+  'pnpm ',
+  'yarn ',
+  'bun ',
+  'bunx ',
+  'make ',
+  'node ',
+  'tsc',
+  'eslint',
+  'prettier',
+  'vitest',
+  'jest',
 ];
 
 const DANGEROUS_PATTERNS = /[;&|`$(){}]|\.\.\//;
 
 function validateCommand(command: string): void {
   const trimmed = command.trim();
-  const isAllowed = ALLOWED_CMD_PREFIXES.some((p) => trimmed.startsWith(p));
+  const isAllowed = ALLOWED_CMD_PREFIXES.some(p => trimmed.startsWith(p));
   if (!isAllowed) {
     throw new Error(
       `Check command rejected — not in allowlist: ${JSON.stringify(trimmed)}. ` +
-      `Allowed prefixes: ${ALLOWED_CMD_PREFIXES.map((p) => p.trim()).join(", ")}`,
+        `Allowed prefixes: ${ALLOWED_CMD_PREFIXES.map(p => p.trim()).join(', ')}`,
     );
   }
   if (DANGEROUS_PATTERNS.test(trimmed)) {
@@ -40,11 +52,9 @@ function validateCommand(command: string): void {
 export async function runChecks(
   workdir: string,
   checks: Check[],
-  scope: "task" | "final",
+  scope: 'task' | 'final',
 ): Promise<ChecksResult> {
-  const applicable = checks.filter(
-    (c) => !c.scope || c.scope === "both" || c.scope === scope,
-  );
+  const applicable = checks.filter(c => !c.scope || c.scope === 'both' || c.scope === scope);
 
   const results: CheckResult[] = [];
 
@@ -53,14 +63,14 @@ export async function runChecks(
     const result = await runShell(workdir, check.command);
     results.push({
       name: check.name,
-      status: result.ok ? "pass" : "fail",
+      status: result.ok ? 'pass' : 'fail',
       ...(result.ok ? {} : { output: (result.stdout + result.stderr).trim() }),
     });
   }
 
   return {
     checks: results,
-    passed: results.every((r) => r.status === "pass"),
+    passed: results.every(r => r.status === 'pass'),
   };
 }
 
@@ -74,10 +84,10 @@ type ShellResult = {
 };
 
 async function runShell(workdir: string, command: string): Promise<ShellResult> {
-  const proc = Bun.spawn(["sh", "-c", command], {
+  const proc = Bun.spawn(['sh', '-c', command], {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const [stdout, stderr] = await Promise.all([

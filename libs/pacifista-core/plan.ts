@@ -1,4 +1,4 @@
-import type { Plan, PlanTask } from "./types.ts";
+import type { Plan, PlanTask } from './types.ts';
 
 /**
  * Parse a markdown plan file into structured tasks.
@@ -10,23 +10,22 @@ import type { Plan, PlanTask } from "./types.ts";
  *   ### 1: Title
  */
 export function parsePlan(markdown: string): Plan {
-  const lines = markdown.split("\n");
+  const lines = markdown.split('\n');
 
-  let title = "";
-  let context = "";
+  let title = '';
+  let context = '';
   const tasks: PlanTask[] = [];
 
-  let section: "none" | "context" | "task" = "none";
+  let section: 'none' | 'context' | 'task' = 'none';
   let currentTask: PlanTask | null = null;
   let bodyLines: string[] = [];
   const contextLines: string[] = [];
 
-  const taskHeadingRe =
-    /^#{2,3}\s+(?:Task\s+)?(\d+)\s*(?::|--|\.)\s*(.+)/i;
+  const taskHeadingRe = /^#{2,3}\s+(?:Task\s+)?(\d+)\s*(?::|--|\.)\s*(.+)/i;
 
   function flushTask() {
     if (currentTask) {
-      const { body, fields } = extractFields(bodyLines.join("\n").trim());
+      const { body, fields } = extractFields(bodyLines.join('\n').trim());
       currentTask.body = body;
       currentTask.fields = fields;
       tasks.push(currentTask);
@@ -46,54 +45,54 @@ export function parsePlan(markdown: string): Plan {
     // Context heading: ## Context
     if (/^#{2}\s+Context\s*$/i.test(line)) {
       flushTask();
-      section = "context";
+      section = 'context';
       continue;
     }
 
     // Tasks container heading: ## Tasks (optional, skip it)
     if (/^#{2}\s+Tasks\s*$/i.test(line)) {
       flushTask();
-      if (section === "context") {
-        context = contextLines.join("\n").trim();
+      if (section === 'context') {
+        context = contextLines.join('\n').trim();
       }
-      section = "none";
+      section = 'none';
       continue;
     }
 
     // Task heading
     const taskMatch = line.match(taskHeadingRe);
     if (taskMatch) {
-      if (section === "context") {
-        context = contextLines.join("\n").trim();
+      if (section === 'context') {
+        context = contextLines.join('\n').trim();
       }
       flushTask();
-      section = "task";
+      section = 'task';
       currentTask = {
         id: parseInt(taskMatch[1]!, 10),
         title: taskMatch[2]!.trim(),
-        body: "",
+        body: '',
         fields: {},
       };
       continue;
     }
 
     // Any other ## heading ends the current context/task
-    if (/^#{2}\s+/.test(line) && section === "context") {
-      context = contextLines.join("\n").trim();
-      section = "none";
+    if (/^#{2}\s+/.test(line) && section === 'context') {
+      context = contextLines.join('\n').trim();
+      section = 'none';
     }
 
     // Accumulate content
-    if (section === "context") {
+    if (section === 'context') {
       contextLines.push(line);
-    } else if (section === "task") {
+    } else if (section === 'task') {
       bodyLines.push(line);
     }
   }
 
   // Flush remaining
-  if (section === "context") {
-    context = contextLines.join("\n").trim();
+  if (section === 'context') {
+    context = contextLines.join('\n').trim();
   }
   flushTask();
 
@@ -111,7 +110,7 @@ function extractFields(text: string): {
   const remaining: string[] = [];
   const fieldRe = /^-\s+\*\*(\w+)\*\*:\s*(.+)/;
 
-  for (const line of text.split("\n")) {
+  for (const line of text.split('\n')) {
     const match = line.match(fieldRe);
     if (match) {
       fields[match[1]!.toLowerCase()] = match[2]!.trim();
@@ -120,5 +119,5 @@ function extractFields(text: string): {
     }
   }
 
-  return { body: remaining.join("\n").trim(), fields };
+  return { body: remaining.join('\n').trim(), fields };
 }

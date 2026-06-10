@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 /**
  * Detect the bare repo root from a worktree path.
@@ -10,9 +10,7 @@ import { resolve } from "node:path";
  *
  * Returns undefined if not in a worktree or detection fails.
  */
-export async function detectBareRepoRoot(
-  worktreePath: string,
-): Promise<string | undefined> {
+export async function detectBareRepoRoot(worktreePath: string): Promise<string | undefined> {
   const gitPath = `${worktreePath}/.git`;
 
   let gitStat;
@@ -26,19 +24,20 @@ export async function detectBareRepoRoot(
   if (gitStat.isDirectory()) return undefined;
 
   const content = await Bun.file(gitPath).text();
-  if (!content.startsWith("gitdir:")) return undefined;
+  if (!content.startsWith('gitdir:')) return undefined;
 
-  const gitdir = content.replace("gitdir:", "").trim();
+  const gitdir = content.replace('gitdir:', '').trim();
 
   try {
-    const proc = Bun.spawn(
-      ["git", `--git-dir=${gitdir}`, "rev-parse", "--git-common-dir"],
-      { cwd: worktreePath, stdout: "pipe", stderr: "pipe" },
-    );
+    const proc = Bun.spawn(['git', `--git-dir=${gitdir}`, 'rev-parse', '--git-common-dir'], {
+      cwd: worktreePath,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const commonDir = (await new Response(proc.stdout).text()).trim();
     const exitCode = await proc.exited;
 
-    if (exitCode !== 0 || !commonDir || commonDir === ".") return undefined;
+    if (exitCode !== 0 || !commonDir || commonDir === '.') return undefined;
 
     return resolve(worktreePath, gitdir, commonDir);
   } catch {
