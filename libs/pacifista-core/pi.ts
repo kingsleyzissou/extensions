@@ -1,20 +1,20 @@
-import type { EventHandler, PiExecOptions, PiCaptureResult, PiResult } from "./types.ts";
+import type { EventHandler, PiExecOptions, PiCaptureResult, PiResult } from './types.ts';
 
 function buildBaseArgs(options?: PiExecOptions): string[] {
   // Always trust project-local files — kuma is the orchestrator and
   // has already been invoked from within the project. Without this,
   // non-interactive pi (-p) ignores project extensions (e.g. quorum)
   // unless the user has a saved trust decision.
-  const args: string[] = ["--approve"];
+  const args: string[] = ['--approve'];
 
   if (options?.noSandbox) {
-    args.push("--no-container");
+    args.push('--no-container');
   } else if (options?.sandbox) {
-    args.push("--sandbox-persist");
+    args.push('--sandbox-persist');
   }
 
   if (options?.noTools) {
-    args.push("--no-tools");
+    args.push('--no-tools');
   }
 
   return args;
@@ -44,25 +44,25 @@ export async function piStream(
   options?: PiExecOptions,
   onEvent?: EventHandler,
 ): Promise<{ exitCode: number }> {
-  const args = ["pi", "--mode", "json", "-p", prompt, ...buildBaseArgs(options)];
+  const args = ['pi', '--mode', 'json', '-p', prompt, ...buildBaseArgs(options)];
 
   const proc = Bun.spawn(args, {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
+  let buffer = '';
 
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -93,29 +93,29 @@ function emitFromStreamEvent(event: StreamEvent, onEvent?: EventHandler): void {
   if (!onEvent) return;
 
   switch (event.type) {
-    case "tool_execution_start":
+    case 'tool_execution_start':
       if (event.toolName && event.args) {
         onEvent({
-          type: "tool:start",
+          type: 'tool:start',
           toolName: event.toolName,
           args: event.args,
         });
       }
       break;
 
-    case "tool_execution_end":
+    case 'tool_execution_end':
       if (event.toolName) {
         onEvent({
-          type: "tool:end",
+          type: 'tool:end',
           toolName: event.toolName,
           isError: event.isError ?? false,
         });
       }
       break;
 
-    case "message_update":
-      if (event.assistantMessageEvent?.type === "text_start") {
-        onEvent({ type: "agent:thinking" });
+    case 'message_update':
+      if (event.assistantMessageEvent?.type === 'text_start') {
+        onEvent({ type: 'agent:thinking' });
       }
       break;
   }
@@ -130,12 +130,12 @@ export async function piCapture(
   workdir: string,
   options?: PiExecOptions,
 ): Promise<PiResult> {
-  const args = ["pi", "-p", prompt, ...buildBaseArgs(options)];
+  const args = ['pi', '-p', prompt, ...buildBaseArgs(options)];
 
   const proc = Bun.spawn(args, {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const [stdout, stderr] = await Promise.all([
@@ -160,39 +160,39 @@ export async function piCaptureWithSession(
   workdir: string,
   options?: PiExecOptions,
 ): Promise<PiCaptureResult> {
-  const args = ["pi", "--mode", "json", "-p", prompt, ...buildBaseArgs(options)];
+  const args = ['pi', '--mode', 'json', '-p', prompt, ...buildBaseArgs(options)];
 
   const proc = Bun.spawn(args, {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
+  let buffer = '';
   let sessionId: string | undefined;
-  let textOutput = "";
+  let textOutput = '';
 
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as StreamEvent;
-        if (event.type === "session" && "id" in event) {
+        if (event.type === 'session' && 'id' in event) {
           sessionId = (event as StreamEvent & { id: string }).id;
         }
         // Reassemble text output from text_delta events
         if (
-          event.type === "message_update" &&
-          event.assistantMessageEvent?.type === "text_delta" &&
+          event.type === 'message_update' &&
+          event.assistantMessageEvent?.type === 'text_delta' &&
           event.assistantMessageEvent.delta
         ) {
           textOutput += event.assistantMessageEvent.delta;
@@ -208,8 +208,8 @@ export async function piCaptureWithSession(
     try {
       const event = JSON.parse(buffer) as StreamEvent;
       if (
-        event.type === "message_update" &&
-        event.assistantMessageEvent?.type === "text_delta" &&
+        event.type === 'message_update' &&
+        event.assistantMessageEvent?.type === 'text_delta' &&
         event.assistantMessageEvent.delta
       ) {
         textOutput += event.assistantMessageEvent.delta;
@@ -225,7 +225,7 @@ export async function piCaptureWithSession(
   return { exitCode, stdout: textOutput, stderr, sessionId };
 }
 
-const KUMA_PROGRESS_PREFIX = "[kuma:progress] ";
+const KUMA_PROGRESS_PREFIX = '[kuma:progress] ';
 
 /**
  * Run the ensemble review via `pi -p "/review <baseBranch>"`.
@@ -244,33 +244,33 @@ export async function piReview(
   options?: PiExecOptions & { outputPath?: string },
   onEvent?: EventHandler,
 ): Promise<PiCaptureResult> {
-  const parts = ["/review"];
+  const parts = ['/review'];
   if (options?.outputPath) {
     parts.push(`--output ${options.outputPath}`);
   }
   if (baseBranch) {
     parts.push(baseBranch);
   }
-  const prompt = parts.join(" ");
-  const args = ["pi", "--mode", "json", "-p", prompt, ...buildBaseArgs(options)];
+  const prompt = parts.join(' ');
+  const args = ['pi', '--mode', 'json', '-p', prompt, ...buildBaseArgs(options)];
 
   const proc = Bun.spawn(args, {
     cwd: workdir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   // Stream stdout for session ID (--mode json)
   const stdoutReader = proc.stdout.getReader();
   const stdoutDecoder = new TextDecoder();
-  let stdoutBuffer = "";
+  let stdoutBuffer = '';
   let sessionId: string | undefined;
 
   const parseStdoutLine = (line: string) => {
     if (!line.trim()) return;
     try {
       const event = JSON.parse(line) as StreamEvent;
-      if (event.type === "session" && "id" in event) {
+      if (event.type === 'session' && 'id' in event) {
         sessionId = (event as StreamEvent & { id: string }).id;
       }
     } catch {
@@ -281,13 +281,13 @@ export async function piReview(
   // Stream stderr for progress lines, collect the rest
   const stderrReader = proc.stderr.getReader();
   const stderrDecoder = new TextDecoder();
-  let stderrBuffer = "";
+  let stderrBuffer = '';
   const stderrLines: string[] = [];
 
   const parseStderrLine = (line: string) => {
     if (line.startsWith(KUMA_PROGRESS_PREFIX) && onEvent) {
       onEvent({
-        type: "review:reviewing",
+        type: 'review:reviewing',
         message: line.slice(KUMA_PROGRESS_PREFIX.length),
       });
     } else {
@@ -301,8 +301,8 @@ export async function piReview(
       const { done, value } = await stdoutReader.read();
       if (done) break;
       stdoutBuffer += stdoutDecoder.decode(value, { stream: true });
-      const lines = stdoutBuffer.split("\n");
-      stdoutBuffer = lines.pop() ?? "";
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) parseStdoutLine(line);
     }
     if (stdoutBuffer.trim()) parseStdoutLine(stdoutBuffer);
@@ -313,8 +313,8 @@ export async function piReview(
       const { done, value } = await stderrReader.read();
       if (done) break;
       stderrBuffer += stderrDecoder.decode(value, { stream: true });
-      const lines = stderrBuffer.split("\n");
-      stderrBuffer = lines.pop() ?? "";
+      const lines = stderrBuffer.split('\n');
+      stderrBuffer = lines.pop() ?? '';
       for (const line of lines) parseStderrLine(line);
     }
     if (stderrBuffer.trim()) stderrLines.push(stderrBuffer);
@@ -323,5 +323,5 @@ export async function piReview(
   await Promise.all([readStdout(), readStderr()]);
   const exitCode = await proc.exited;
 
-  return { exitCode, stdout: "", stderr: stderrLines.join("\n"), sessionId };
+  return { exitCode, stdout: '', stderr: stderrLines.join('\n'), sessionId };
 }

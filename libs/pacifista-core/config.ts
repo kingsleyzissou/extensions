@@ -1,12 +1,12 @@
-import { resolve } from "node:path";
-import type { DeepPartial, PacifistaConfig } from "./types.ts";
-import { detectBareRepoRoot } from "./git.ts";
+import { resolve } from 'node:path';
+import type { DeepPartial, PacifistaConfig } from './types.ts';
+import { detectBareRepoRoot } from './git.ts';
 
 const DEFAULTS: PacifistaConfig = {
   checks: [
-    { name: "typecheck", command: "npm run typecheck" },
-    { name: "lint", command: "npm run lint" },
-    { name: "tests", command: "npm test" },
+    { name: 'typecheck', command: 'npm run typecheck' },
+    { name: 'lint', command: 'npm run lint' },
+    { name: 'tests', command: 'npm test' },
   ],
   pi: {
     sandbox: false,
@@ -16,7 +16,7 @@ const DEFAULTS: PacifistaConfig = {
   prompt: {},
   review: {
     enabled: true,
-    reviewsDir: "docs/reviews",
+    reviewsDir: 'docs/reviews',
   },
   gate: {
     autoApprove: false,
@@ -49,14 +49,14 @@ async function findAndLoadConfig(
     searchPaths.push(projectRoot);
   }
 
-  const configDirs = [".kuma", ".pacifista"];
+  const configDirs = ['.kuma', '.pacifista'];
 
   for (const base of searchPaths) {
     for (const dir of configDirs) {
-      const jsPath = resolve(base, dir, "config.js");
+      const jsPath = resolve(base, dir, 'config.js');
       // Ensure the resolved path stays within the expected base directory
       // to prevent path-traversal attacks (e.g. symlinks or ../ segments).
-      if (!jsPath.startsWith(resolve(base) + "/")) continue;
+      if (!jsPath.startsWith(resolve(base) + '/')) continue;
 
       const jsFile = Bun.file(jsPath);
       if (await jsFile.exists()) {
@@ -64,8 +64,8 @@ async function findAndLoadConfig(
         return mod.default ?? mod;
       }
 
-      const jsonPath = resolve(base, dir, "config.json");
-      if (!jsonPath.startsWith(resolve(base) + "/")) continue;
+      const jsonPath = resolve(base, dir, 'config.json');
+      if (!jsonPath.startsWith(resolve(base) + '/')) continue;
 
       const jsonFile = Bun.file(jsonPath);
       if (await jsonFile.exists()) {
@@ -77,15 +77,11 @@ async function findAndLoadConfig(
   return {};
 }
 
-
-
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function deepMerge(
-  ...sources: Array<DeepPartial<PacifistaConfig>>
-): PacifistaConfig {
+function deepMerge(...sources: Array<DeepPartial<PacifistaConfig>>): PacifistaConfig {
   const result = { ...sources[0] } as Record<string, unknown>;
 
   for (let i = 1; i < sources.length; i++) {

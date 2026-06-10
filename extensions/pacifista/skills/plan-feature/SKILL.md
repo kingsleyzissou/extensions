@@ -47,6 +47,7 @@ relevant existing code, patterns to follow, patterns to avoid.>
 
 <Freeform description. Be specific enough that an agent with no prior
 context can implement this in a single session. Include:
+
 - What to create, modify, or delete
 - Expected behavior
 - Edge cases to handle
@@ -150,6 +151,7 @@ Follow these conventions:
 - Do NOT use semantic prefixes (feat, fix, chore, etc.)
 
 Examples:
+
 - `- **commit**: \`TimezoneSelector: add component skeleton\``
 - `- **commit**: \`store: add derived selectors for FS customizations\``
 - `- **commit**: \`tests: remove legacy azure integration test\``

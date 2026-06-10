@@ -27,7 +27,7 @@ export type PacifistaConfig = {
 export type Check = {
   name: string;
   command: string;
-  scope?: "task" | "final" | "both";
+  scope?: 'task' | 'final' | 'both';
 };
 
 export type PiConfig = {
@@ -61,16 +61,36 @@ export type GateConfig = {
 // ── Journal event types ─────────────────────────────────────────────────
 
 export type JournalEvent =
-  | { type: "run:started"; planPath: string; worktreePath: string; ts: string; tasks: { id: number; title: string }[] }
-  | { type: "task:started"; taskId: number; attempt: number; sessionId?: string; ts: string }
-  | { type: "task:checked"; taskId: number; attempt: number; checksResult: ChecksResult; changedFiles: string[]; ts: string }
-  | { type: "task:approved"; taskId: number; attempt: number; commitSha?: string; ts: string }
-  | { type: "task:revised"; taskId: number; attempt: number; feedback: string; ts: string }
-  | { type: "task:rejected"; taskId: number; attempt: number; stop: boolean; ts: string }
-  | { type: "task:skipped"; taskId: number; ts: string }
-  | { type: "review:completed"; reviewData: ReviewData; verdicts: TriageVerdictData[]; reviewSessionId?: string; triageSessionId?: string; ts: string }
-  | { type: "run:paused"; ts: string }
-  | { type: "run:completed"; ts: string };
+  | {
+      type: 'run:started';
+      planPath: string;
+      worktreePath: string;
+      ts: string;
+      tasks: { id: number; title: string }[];
+    }
+  | { type: 'task:started'; taskId: number; attempt: number; sessionId?: string; ts: string }
+  | {
+      type: 'task:checked';
+      taskId: number;
+      attempt: number;
+      checksResult: ChecksResult;
+      changedFiles: string[];
+      ts: string;
+    }
+  | { type: 'task:approved'; taskId: number; attempt: number; commitSha?: string; ts: string }
+  | { type: 'task:revised'; taskId: number; attempt: number; feedback: string; ts: string }
+  | { type: 'task:rejected'; taskId: number; attempt: number; stop: boolean; ts: string }
+  | { type: 'task:skipped'; taskId: number; ts: string }
+  | {
+      type: 'review:completed';
+      reviewData: ReviewData;
+      verdicts: TriageVerdictData[];
+      reviewSessionId?: string;
+      triageSessionId?: string;
+      ts: string;
+    }
+  | { type: 'run:paused'; ts: string }
+  | { type: 'run:completed'; ts: string };
 
 // ── State types (derived from journal replay) ───────────────────────────
 
@@ -89,7 +109,7 @@ export type RunState = {
 export type TaskState = {
   id: number;
   title: string;
-  status: "pending" | "in_progress" | "approved" | "rejected" | "skipped";
+  status: 'pending' | 'in_progress' | 'approved' | 'rejected' | 'skipped';
   attempts: Attempt[];
 };
 
@@ -98,14 +118,14 @@ export type Attempt = {
   completedAt?: string;
   checks?: ChecksResult;
   changedFiles?: string[];
-  outcome?: "approved" | "revise" | "rejected";
+  outcome?: 'approved' | 'revise' | 'rejected';
   revision?: string;
   sessionId?: string;
 };
 
 export type CheckResult = {
   name: string;
-  status: "pass" | "fail";
+  status: 'pass' | 'fail';
   output?: string;
 };
 
@@ -175,40 +195,46 @@ export type PiExecOptions = {
 // ── Gate types ──────────────────────────────────────────────────────────
 
 export type GateAction =
-  | { action: "approve" }
-  | { action: "revise"; feedback: string }
-  | { action: "reject"; stop: boolean }
-  | { action: "quit" };
+  | { action: 'approve' }
+  | { action: 'revise'; feedback: string }
+  | { action: 'reject'; stop: boolean }
+  | { action: 'quit' };
 
 // ── Event types (for TUI/extension consumers) ──────────────────────────
 
 export type PacifistaEvent =
-  | { type: "plan:loaded"; plan: Plan }
-  | { type: "setup:start"; command: string }
-  | { type: "setup:output"; text: string }
-  | { type: "setup:done"; ok: boolean }
-  | { type: "task:start"; task: PlanTask; attempt: number }
-  | { type: "task:complete"; task: PlanTask; exitCode: number }
-  | { type: "tool:start"; toolName: string; args: Record<string, unknown> }
-  | { type: "tool:end"; toolName: string; isError: boolean }
-  | { type: "agent:thinking" }
-  | { type: "checks:start" }
-  | { type: "checks:done"; result: ChecksResult }
-  | { type: "gate:needed"; task: PlanTask; attempt: number; changedFiles: string[]; checksResult: ChecksResult }
-  | { type: "task:approved"; task: PlanTask }
-  | { type: "task:rejected"; task: PlanTask }
-  | { type: "task:skipped"; task: PlanTask }
-  | { type: "run:summary"; result: RunResult }
-  | { type: "final-checks:start" }
-  | { type: "final-checks:done"; result: ChecksResult }
-  | { type: "final-checks:failed"; result: ChecksResult }
-  | { type: "review:start" }
-  | { type: "review:reviewing"; message?: string }
-  | { type: "review:triage" }
-  | { type: "review:fix"; current: number; total: number; description: string }
-  | { type: "review:done"; fixes: number }
-  | { type: "state:saved" }
-  | { type: "error"; message: string };
+  | { type: 'plan:loaded'; plan: Plan }
+  | { type: 'setup:start'; command: string }
+  | { type: 'setup:output'; text: string }
+  | { type: 'setup:done'; ok: boolean }
+  | { type: 'task:start'; task: PlanTask; attempt: number }
+  | { type: 'task:complete'; task: PlanTask; exitCode: number }
+  | { type: 'tool:start'; toolName: string; args: Record<string, unknown> }
+  | { type: 'tool:end'; toolName: string; isError: boolean }
+  | { type: 'agent:thinking' }
+  | { type: 'checks:start' }
+  | { type: 'checks:done'; result: ChecksResult }
+  | {
+      type: 'gate:needed';
+      task: PlanTask;
+      attempt: number;
+      changedFiles: string[];
+      checksResult: ChecksResult;
+    }
+  | { type: 'task:approved'; task: PlanTask }
+  | { type: 'task:rejected'; task: PlanTask }
+  | { type: 'task:skipped'; task: PlanTask }
+  | { type: 'run:summary'; result: RunResult }
+  | { type: 'final-checks:start' }
+  | { type: 'final-checks:done'; result: ChecksResult }
+  | { type: 'final-checks:failed'; result: ChecksResult }
+  | { type: 'review:start' }
+  | { type: 'review:reviewing'; message?: string }
+  | { type: 'review:triage' }
+  | { type: 'review:fix'; current: number; total: number; description: string }
+  | { type: 'review:done'; fixes: number }
+  | { type: 'state:saved' }
+  | { type: 'error'; message: string };
 
 export type EventHandler = (event: PacifistaEvent) => void;
 
@@ -235,7 +261,7 @@ export type ReviewData = {
 
 export type TriageVerdictData = {
   id: number;
-  verdict: "fix" | "defer" | "pushback";
+  verdict: 'fix' | 'defer' | 'pushback';
   sha?: string;
   description: string;
 };

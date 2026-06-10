@@ -66,18 +66,18 @@ After `/sandbox update`, restart pi. Existing containers keep using the old imag
 
 ## Flags
 
-| Flag | Purpose |
-|---|---|
-| `--no-container`, `--noc` | Disable sandbox |
-| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg` | Resource tier (`sm` default) |
-| `--sandbox-name <name>` | Reattach/reuse named container |
-| `--sandbox-persist` | Keep reusable container running after pi exits |
-| `--sandbox-cache <volume>` | Mount volume at `/cache` |
-| `--container-image <ref>` | Override image ref |
-| `--no-container-net` | Disable container networking |
-| `--container-keep` | Keep one-off container after exit |
-| `--container-allow-paths <paths>` | Comma-separated session read allowlist |
-| `--container-memory`, `--container-cpus`, `--container-swap`, `--container-pids-limit` | Override tier resources |
+| Flag                                                                                   | Purpose                                        |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `--no-container`, `--noc`                                                              | Disable sandbox                                |
+| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg`                                           | Resource tier (`sm` default)                   |
+| `--sandbox-name <name>`                                                                | Reattach/reuse named container                 |
+| `--sandbox-persist`                                                                    | Keep reusable container running after pi exits |
+| `--sandbox-cache <volume>`                                                             | Mount volume at `/cache`                       |
+| `--container-image <ref>`                                                              | Override image ref                             |
+| `--no-container-net`                                                                   | Disable container networking                   |
+| `--container-keep`                                                                     | Keep one-off container after exit              |
+| `--container-allow-paths <paths>`                                                      | Comma-separated session read allowlist         |
+| `--container-memory`, `--container-cpus`, `--container-swap`, `--container-pids-limit` | Override tier resources                        |
 
 ## Image contents
 

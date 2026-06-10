@@ -1,9 +1,9 @@
-import { appendFile, mkdir } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
-import type { JournalEvent, RunState, TaskState } from "./types.ts";
-import { detectBareRepoRoot } from "./git.ts";
+import { appendFile, mkdir } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
+import type { JournalEvent, RunState, TaskState } from './types.ts';
+import { detectBareRepoRoot } from './git.ts';
 
-const JOURNAL_FILE = "journal.jsonl";
+const JOURNAL_FILE = 'journal.jsonl';
 
 // ── Path derivation ─────────────────────────────────────────────────────
 
@@ -23,12 +23,11 @@ const JOURNAL_FILE = "journal.jsonl";
  * Deterministic from the two paths — the same inputs always produce
  * the same journal location.
  */
-export async function getJournalPath(
-  worktreePath: string,
-): Promise<string> {
-  const home = process.env.XDG_STATE_HOME ?? (process.env.HOME ? `${process.env.HOME}/.local/state` : null);
+export async function getJournalPath(worktreePath: string): Promise<string> {
+  const home =
+    process.env.XDG_STATE_HOME ?? (process.env.HOME ? `${process.env.HOME}/.local/state` : null);
   if (!home) {
-    throw new Error("Cannot determine state directory: neither XDG_STATE_HOME nor HOME is set");
+    throw new Error('Cannot determine state directory: neither XDG_STATE_HOME nor HOME is set');
   }
   const stateHome = home;
 
@@ -46,9 +45,9 @@ export async function getJournalPath(
  * Returns a hex string.
  */
 function hashString(input: string): string {
-  const hasher = new Bun.CryptoHasher("sha256");
+  const hasher = new Bun.CryptoHasher('sha256');
   hasher.update(input);
-  return hasher.digest("hex");
+  return hasher.digest('hex');
 }
 
 // ── Journal operations ──────────────────────────────────────────────────
@@ -71,7 +70,7 @@ export async function appendEvent(
   state?: RunState,
 ): Promise<void> {
   await mkdir(dirname(journalPath), { recursive: true });
-  await appendFile(journalPath, JSON.stringify(event) + "\n");
+  await appendFile(journalPath, JSON.stringify(event) + '\n');
 
   // Incrementally apply the event to the in-memory state
   if (state) {
@@ -95,14 +94,14 @@ export async function replayState(journalPath: string): Promise<RunState> {
   }
 
   const text = await file.text();
-  const lines = text.split("\n").filter(Boolean);
+  const lines = text.split('\n').filter(Boolean);
 
   // Find the last run:started to replay only the most recent run
   let startIndex = 0;
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const event = JSON.parse(lines[i]!) as JournalEvent;
-      if (event.type === "run:started") {
+      if (event.type === 'run:started') {
         startIndex = i;
         break;
       }
@@ -141,12 +140,9 @@ export async function journalExists(journalPath: string): Promise<boolean> {
 
 // ── Event application ───────────────────────────────────────────────────
 
-function applyEvent(
-  state: RunState | null,
-  event: JournalEvent,
-): RunState | null {
+function applyEvent(state: RunState | null, event: JournalEvent): RunState | null {
   switch (event.type) {
-    case "run:started": {
+    case 'run:started': {
       return {
         planPath: event.planPath,
         worktreePath: event.worktreePath,
@@ -156,19 +152,19 @@ function applyEvent(
           (t): TaskState => ({
             id: t.id,
             title: t.title,
-            status: "pending",
+            status: 'pending',
             attempts: [],
           }),
         ),
       };
     }
 
-    case "task:started": {
+    case 'task:started': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
-      task.status = "in_progress";
+      task.status = 'in_progress';
       state.currentTask = event.taskId;
       task.attempts.push({
         startedAt: event.ts,
@@ -177,9 +173,9 @@ function applyEvent(
       return state;
     }
 
-    case "task:session": {
+    case 'task:session': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
       const attempt = task.attempts[event.attempt - 1];
@@ -188,9 +184,9 @@ function applyEvent(
       }
       return state;
     }
-    case "task:checked": {
+    case 'task:checked': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
       const attempt = task.attempts[event.attempt - 1];
@@ -202,55 +198,55 @@ function applyEvent(
       return state;
     }
 
-    case "task:approved": {
+    case 'task:approved': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
-      task.status = "approved";
+      task.status = 'approved';
       const attempt = task.attempts[event.attempt - 1];
       if (attempt) {
-        attempt.outcome = "approved";
+        attempt.outcome = 'approved';
       }
       return state;
     }
 
-    case "task:revised": {
+    case 'task:revised': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
       const attempt = task.attempts[event.attempt - 1];
       if (attempt) {
-        attempt.outcome = "revise";
+        attempt.outcome = 'revise';
         attempt.revision = event.feedback;
       }
       return state;
     }
 
-    case "task:rejected": {
+    case 'task:rejected': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
-      task.status = "rejected";
+      task.status = 'rejected';
       const attempt = task.attempts[event.attempt - 1];
       if (attempt) {
-        attempt.outcome = "rejected";
+        attempt.outcome = 'rejected';
       }
       return state;
     }
 
-    case "task:skipped": {
+    case 'task:skipped': {
       if (!state) return state;
-      const task = state.tasks.find((t) => t.id === event.taskId);
+      const task = state.tasks.find(t => t.id === event.taskId);
       if (!task) return state;
 
-      task.status = "skipped";
+      task.status = 'skipped';
       return state;
     }
 
-    case "review:completed": {
+    case 'review:completed': {
       if (!state) return state;
       if (event.reviewSessionId) {
         state.reviewSessionId = event.reviewSessionId;
@@ -261,8 +257,8 @@ function applyEvent(
       return state;
     }
 
-    case "run:paused":
-    case "run:completed":
+    case 'run:paused':
+    case 'run:completed':
       return state;
 
     default: {
