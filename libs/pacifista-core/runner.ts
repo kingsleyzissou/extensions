@@ -187,9 +187,12 @@ export async function runPlan(
         await config.hooks.beforeChecks(task, ctx);
       }
 
-      // Checks
+      // Checks — skip tdd-scoped checks for config/scaffolding tasks
+      const isTdd = task.fields['tdd']?.toLowerCase() !== 'false';
       onEvent({ type: 'checks:start' });
-      const checksResult = await runChecks(options.worktreePath, config.checks, 'task');
+      const checksResult = await runChecks(options.worktreePath, config.checks, 'task', {
+        tdd: isTdd,
+      });
 
       await appendEvent(journalPath, {
         type: 'task:checked',
@@ -219,7 +222,7 @@ export async function runPlan(
           let commitSha: string | undefined;
           if (options.commitPerTask) {
             const commitMsg = buildCommitMessage(task);
-            commitSha = await commitChanges(options.worktreePath, commitMsg, config.format);
+            commitSha = await stageAndCommit(options.worktreePath, commitMsg, config.format);
           }
 
           await appendEvent(journalPath, {
@@ -335,51 +338,6 @@ async function loadOrCreateState(
   return replayState(journalPath);
 }
 
-async function getHead(workdir: string): Promise<string> {
-  const proc = Bun.spawn(['git', 'rev-parse', 'HEAD'], {
-    cwd: workdir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const stdout = await new Response(proc.stdout).text();
-  await proc.exited;
-  return stdout.trim();
-}
-
-async function getChangedFiles(workdir: string, base?: string): Promise<string[]> {
-  const ref = base ?? 'HEAD';
-
-  // Modified/deleted tracked files
-  const diff = Bun.spawn(['git', 'diff', '--name-only', ref], {
-    cwd: workdir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const diffOut = await new Response(diff.stdout).text();
-  await diff.exited;
-
-  // New untracked files (e.g. .prettierrc, new source files)
-  const untracked = Bun.spawn(['git', 'ls-files', '--others', '--exclude-standard'], {
-    cwd: workdir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const untrackedOut = await new Response(untracked.stdout).text();
-  await untracked.exited;
-
-  const files = new Set<string>();
-  for (const f of diffOut.split('\n')) {
-    const trimmed = f.trim();
-    if (trimmed) files.add(trimmed);
-  }
-  for (const f of untrackedOut.split('\n')) {
-    const trimmed = f.trim();
-    if (trimmed) files.add(trimmed);
-  }
-
-  return [...files];
-}
-
 /**
  * Build a commit message from a task.
  *
@@ -400,68 +358,6 @@ function buildCommitMessage(task: PlanTask): string {
   // Sanitize: take only the first line to prevent trailer injection
   // via embedded newlines (e.g. injecting Co-authored-by).
   return msg.split('\n')[0]!.trim();
-}
-
-/**
- * Stage all changes and commit on the host.
- *
- * Runs outside the sandbox so the user's git config, GPG keys,
- * and signing preferences are all available.
- *
- * Returns the commit SHA on success, undefined if nothing to commit.
- */
-async function commitChanges(
-  workdir: string,
-  message: string,
-  formatCmd?: string,
-): Promise<string | undefined> {
-  // Run formatter before staging so commit hooks have nothing to change
-  if (formatCmd) {
-    Bun.spawnSync(['sh', '-c', formatCmd], {
-      cwd: workdir,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-  }
-
-  const add = Bun.spawn(['git', 'add', '-A'], {
-    cwd: workdir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const addStderr = await new Response(add.stderr).text();
-  const addExit = await add.exited;
-
-  if (addExit !== 0) {
-    throw new Error(`git add failed (exit ${addExit}): ${addStderr}`);
-  }
-
-  const commit = Bun.spawn(['git', 'commit', '-m', message], {
-    cwd: workdir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  // Read stderr before awaiting exit — the pipe data can be
-  // lost if the process exits before we start reading.
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(commit.stdout).text(),
-    new Response(commit.stderr).text(),
-    commit.exited,
-  ]);
-
-  if (exitCode !== 0) {
-    // "nothing to commit" is not an error — the agent may not
-    // have changed anything (e.g. on a revision that was a no-op).
-    if (!stderr.includes('nothing to commit')) {
-      throw new Error(`git commit failed (exit ${exitCode}): ${stderr}`);
-    }
-    return undefined;
-  }
-
-  // Extract short SHA from commit output, e.g. "[branch abc1234] message"
-  const shaMatch = stdout.match(/\[\S+\s+([a-f0-9]+)\]/);
-  return shaMatch?.[1];
 }
 
 async function execCapture(command: string, cwd: string): Promise<ExecResult> {

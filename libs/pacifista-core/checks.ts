@@ -53,8 +53,17 @@ export async function runChecks(
   workdir: string,
   checks: Check[],
   scope: 'task' | 'final',
+  options?: { tdd?: boolean },
 ): Promise<ChecksResult> {
-  const applicable = checks.filter(c => !c.scope || c.scope === 'both' || c.scope === scope);
+  const tdd = options?.tdd ?? true;
+  const applicable = checks.filter(c => {
+    if (c.scope === 'tdd') {
+      // tdd-scoped: always run in final phase, skip during task phase
+      // when the task is a config/scaffolding task (tdd: false)
+      return scope === 'final' || tdd;
+    }
+    return !c.scope || c.scope === 'both' || c.scope === scope;
+  });
 
   const results: CheckResult[] = [];
 

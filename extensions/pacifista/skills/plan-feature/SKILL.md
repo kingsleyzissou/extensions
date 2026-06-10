@@ -80,6 +80,7 @@ context can implement this in a single session. Include:
    - `- **files**: src/foo.ts, src/bar.ts` -- files involved
    - `- **acceptance**: tests pass, type exports correctly` -- done criteria
    - `- **commit**: \`Component: short description\`` -- commit message
+   - `- **tdd**: false` -- skip TDD instructions for config/scaffolding tasks
    - `- **depends**: 1` -- task dependency (reserved, not yet enforced)
 
 ## Planning Process
@@ -100,7 +101,9 @@ Break the work into tasks that follow these constraints:
 - **Each task must compile independently** -- after the agent finishes a
   task, typecheck and lint must pass
 - **TDD** -- each task that adds or modifies behavior should include
-  colocated test files (`.test.ts` / `.test.tsx`)
+  colocated test files (`.test.ts` / `.test.tsx`). For pure config or
+  scaffolding tasks (e.g. adding `.prettierrc`, updating `tsconfig.json`,
+  CI files), add `- **tdd**: false` to skip the TDD approach
 - **Skeleton-first ordering** -- types and interfaces before
   implementations, infrastructure before consumers
 - **No forward references** -- a task must not depend on code that a later

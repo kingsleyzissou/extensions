@@ -29,7 +29,15 @@ export type PacifistaConfig = {
 export type Check = {
   name: string;
   command: string;
-  scope?: 'task' | 'final' | 'both';
+  /** When to run this check.
+   *  - `"task"` — after each task
+   *  - `"final"` — only in the final check phase
+   *  - `"both"` — after each task AND in the final phase (default)
+   *  - `"tdd"` — after each task only when `**tdd**: false` is NOT set,
+   *    and always in the final phase. Use this for test commands that
+   *    should be skipped on config/scaffolding tasks.
+   */
+  scope?: 'task' | 'final' | 'both' | 'tdd';
 };
 
 export type PiConfig = {
