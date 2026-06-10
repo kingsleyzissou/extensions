@@ -200,11 +200,38 @@ export function createEventRenderer(): {
         break;
 
       case 'review:reviewing':
-        setStatus('ensemble review: reviewing...');
+        setStatus(`ensemble review: ${event.message ?? 'reviewing...'}`);
         break;
 
       case 'review:triage':
         setStatus('ensemble review: triaging findings...');
+        break;
+
+      case 'review:verdicts': {
+        stopSpinner();
+        const fixCount = event.verdicts.filter(v => v.verdict === 'fix').length;
+        const deferCount = event.verdicts.filter(v => v.verdict === 'defer').length;
+        const pushbackCount = event.verdicts.filter(v => v.verdict === 'pushback').length;
+        const parts: string[] = [];
+        if (fixCount > 0) parts.push(`${fixCount} fix`);
+        if (deferCount > 0) parts.push(`${deferCount} defer`);
+        if (pushbackCount > 0) parts.push(`${pushbackCount} pushback`);
+        p.log.info(`Triage: ${parts.join(', ')}`);
+
+        // Show each verdict
+        const lines = event.verdicts.map(v => {
+          const icon = v.verdict === 'fix' ? '\u2717' : v.verdict === 'defer' ? '\u25CB' : '\u2190';
+          return `${icon} [${v.verdict}] ${v.description}${v.sha ? ` (${v.sha})` : ''}`;
+        });
+        if (lines.length > 0) {
+          p.note(lines.join('\n'), 'Triage Verdicts');
+        }
+        break;
+      }
+
+      case 'review:applying':
+        startSpinner();
+        setStatus(`applying ${event.total} fix${event.total === 1 ? '' : 'es'}...`);
         break;
 
       case 'review:fix':

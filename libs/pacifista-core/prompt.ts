@@ -113,13 +113,13 @@ export function buildTriagePrompt(
 /**
  * Build a fix prompt for applying a single review fix.
  */
-export function buildFixPrompt(description: string, sha: string): string {
+export function buildFixPrompt(description: string, _sha: string): string {
   return [
     `Fix the following issue:\n\n${description}`,
     '',
-    'After fixing, commit with:',
-    `  git commit --fixup=${sha}`,
+    '## Important',
     '',
-    'Do NOT rebase — the orchestrator will handle autosquash.',
+    'Do NOT run `git commit`. The orchestrator will handle committing',
+    'your changes after they pass quality checks.',
   ].join('\n');
 }

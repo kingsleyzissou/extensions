@@ -232,6 +232,8 @@ export type PacifistaEvent =
   | { type: 'review:start' }
   | { type: 'review:reviewing'; message?: string }
   | { type: 'review:triage' }
+  | { type: 'review:verdicts'; verdicts: TriageVerdictData[] }
+  | { type: 'review:applying'; total: number }
   | { type: 'review:fix'; current: number; total: number; description: string }
   | { type: 'review:done'; fixes: number }
   | { type: 'state:saved' }
@@ -266,3 +268,12 @@ export type TriageVerdictData = {
   sha?: string;
   description: string;
 };
+
+/**
+ * Handler that lets the user filter triage verdicts before fixes
+ * are applied. Returns the subset of verdicts to actually fix.
+ * If not provided, all "fix" verdicts are applied automatically.
+ */
+export type TriageGateHandler = (
+  verdicts: TriageVerdictData[],
+) => Promise<TriageVerdictData[]>;

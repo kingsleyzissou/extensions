@@ -43,4 +43,4 @@ export type {
 } from './types.ts';
 
 export type { GateHandler } from './runner.ts';
-export type { TriageVerdict } from './review.ts';
+export type { TriageVerdict, TriageGateHandler } from './review.ts';

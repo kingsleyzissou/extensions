@@ -4,6 +4,7 @@ import type {
   GateAction,
   GateConfig,
   PlanTask,
+  TriageVerdict,
 } from '@kingsleyzissou/pacifista-core';
 
 /**
@@ -105,6 +106,40 @@ function shouldAutoApprove(
     return checksResult.passed;
   }
   return false;
+}
+
+/**
+ * Present triage verdicts and let the user select which fixes to apply.
+ *
+ * All "fix" verdicts are pre-selected. The user can deselect false
+ * positives or items they want to defer. Returns the filtered list.
+ */
+export async function presentTriageGate(verdicts: TriageVerdict[]): Promise<TriageVerdict[]> {
+  if (verdicts.length === 0) return [];
+
+  if (verdicts.length === 1) {
+    const v = verdicts[0]!;
+    const apply = await p.confirm({
+      message: `Apply fix: ${v.description}${v.sha ? ` (${v.sha})` : ''}?`,
+    });
+    if (p.isCancel(apply)) return [];
+    return apply ? [v] : [];
+  }
+
+  const selected = await p.multiselect({
+    message: 'Select fixes to apply (space to toggle, enter to confirm)',
+    options: verdicts.map((v, i) => ({
+      value: i,
+      label: v.description,
+      hint: v.sha ? `fixup → ${v.sha}` : undefined,
+    })),
+    initialValues: verdicts.map((_, i) => i),
+    required: false,
+  });
+
+  if (p.isCancel(selected)) return [];
+
+  return (selected as number[]).map(i => verdicts[i]!);
 }
 
 function fmtStatus(status: 'pass' | 'fail'): string {

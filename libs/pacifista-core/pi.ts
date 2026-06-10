@@ -43,7 +43,7 @@ export async function piStream(
   workdir: string,
   options?: PiExecOptions,
   onEvent?: EventHandler,
-): Promise<{ exitCode: number }> {
+): Promise<{ exitCode: number; sessionId?: string }> {
   const args = ['pi', '--mode', 'json', '-p', prompt, ...buildBaseArgs(options)];
 
   const proc = Bun.spawn(args, {
@@ -55,6 +55,7 @@ export async function piStream(
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let sessionId: string | undefined;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -68,6 +69,9 @@ export async function piStream(
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as StreamEvent;
+        if (event.type === 'session' && 'id' in event) {
+          sessionId = (event as StreamEvent & { id: string }).id;
+        }
         emitFromStreamEvent(event, onEvent);
       } catch {
         // Skip non-JSON lines
@@ -86,7 +90,7 @@ export async function piStream(
   }
 
   const exitCode = await proc.exited;
-  return { exitCode };
+  return { exitCode, sessionId };
 }
 
 function emitFromStreamEvent(event: StreamEvent, onEvent?: EventHandler): void {

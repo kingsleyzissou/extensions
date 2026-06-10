@@ -18,6 +18,8 @@ import { piStream } from './pi.ts';
 import { buildTaskPrompt } from './prompt.ts';
 import { runChecks } from './checks.ts';
 import { runReviewStage } from './review.ts';
+import { getHead, getChangedFiles, stageAndCommit } from './git.ts';
+import type { TriageGateHandler } from './types.ts';
 
 export type GateHandler = (
   task: PlanTask,
@@ -38,6 +40,7 @@ export async function runPlan(
   options: RunOptions,
   onEvent: EventHandler,
   onGate: GateHandler,
+  onTriageGate?: TriageGateHandler,
 ): Promise<RunResult> {
   const config = await loadConfig(options.worktreePath, options.configOverrides);
 
@@ -152,6 +155,17 @@ export async function runPlan(
         { sandbox: config.pi.sandbox, noSandbox: config.pi.noSandbox },
         onEvent,
       );
+
+      // Backfill session ID now that we have it from pi's JSON stream
+      if (result.sessionId) {
+        await appendEvent(journalPath, {
+          type: 'task:session',
+          taskId: task.id,
+          attempt: attemptNum,
+          sessionId: result.sessionId,
+          ts: new Date().toISOString(),
+        });
+      }
 
       onEvent({
         type: 'task:complete',
@@ -278,7 +292,7 @@ export async function runPlan(
 
   // Review stage
   if (!options.skipReview) {
-    await runReviewStage(options.worktreePath, config, journalPath, onEvent, onGate);
+    await runReviewStage(options.worktreePath, config, journalPath, onEvent, onGate, onTriageGate);
   }
 
   await appendEvent(journalPath, {

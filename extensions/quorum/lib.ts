@@ -178,6 +178,7 @@ export async function runReviewer(
   agentPromptPath: string,
   task: string,
   signal?: AbortSignal,
+  options?: { allowPaths?: string[] },
 ): Promise<{ output: string; exitCode: number; error?: string }> {
   const args = [
     '--mode',
@@ -193,8 +194,14 @@ export async function runReviewer(
     REVIEWER_TOOLS.join(','),
     '--append-system-prompt',
     agentPromptPath,
-    task,
   ];
+
+  // Allow the reviewer's sandbox to read external paths (e.g. temp dir with PR materials)
+  if (options?.allowPaths?.length) {
+    args.push('--container-allow-paths', options.allowPaths.join(','));
+  }
+
+  args.push(task);
 
   return new Promise(resolve => {
     const invocation = getPiInvocation(args);
