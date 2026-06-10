@@ -49,6 +49,13 @@ async function isQuorumAvailable(worktreePath: string): Promise<boolean> {
 }
 
 /**
+ * Handler that lets the user filter triage verdicts before fixes
+ * are applied. Returns the subset of verdicts to actually fix.
+ * If not provided, all "fix" verdicts are applied automatically.
+ */
+export type TriageGateHandler = (verdicts: TriageVerdict[]) => Promise<TriageVerdict[]>;
+
+/**
  * Run the ensemble review stage.
  */
 export async function runReviewStage(
@@ -57,6 +64,7 @@ export async function runReviewStage(
   journalPath: string | undefined,
   onEvent?: EventHandler,
   onGate?: GateHandler,
+  onTriageGate?: TriageGateHandler,
 ): Promise<{ reviewed: boolean; fixes: number }> {
   if (!config.review.enabled) {
     return { reviewed: false, fixes: 0 };
@@ -112,7 +120,6 @@ export async function runReviewStage(
   }
 
   const verdicts = parseVerdicts(triageResult.stdout);
-  const fixes = verdicts.filter(v => v.verdict === 'fix');
 
   // Save review data and verdicts to journal (if one exists)
   if (journalPath) {
@@ -126,12 +133,21 @@ export async function runReviewStage(
     });
   }
 
+  // Present all verdicts so the TUI can display the full triage result
+  onEvent?.({ type: 'review:verdicts', verdicts: verdicts as TriageVerdictData[] });
+
+  // Gate: let the user decide which fixes to apply.
+  // Without a triage gate, all "fix" verdicts are applied automatically.
+  const candidateFixes = verdicts.filter(v => v.verdict === 'fix');
+  const fixes = onTriageGate ? await onTriageGate(candidateFixes) : candidateFixes;
+
   if (fixes.length === 0) {
     onEvent?.({ type: 'review:done', fixes: 0 });
     return { reviewed: true, fixes: 0 };
   }
 
   // Apply fixes
+  onEvent?.({ type: 'review:applying', total: fixes.length });
   let appliedFixes = 0;
 
   for (let i = 0; i < fixes.length; i++) {
@@ -166,28 +182,107 @@ export async function runReviewStage(
         checksResult,
         config.gate,
       );
-      if (action.action === 'approve') {
-        appliedFixes++;
-      }
-    } else {
+      if (action.action !== 'approve') continue;
+    }
+
+    // Commit the fix on the host with --fixup so autosquash can
+    // fold it into the original commit. This mirrors how the normal
+    // task flow commits — the agent never runs git commit itself.
+    const commitSha = await commitFixup(worktreePath, fix);
+    if (commitSha) {
       appliedFixes++;
     }
   }
 
-  // Autosquash
+  // Autosquash all fixup commits into their targets.
   if (appliedFixes > 0) {
-    const squashCmd = `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash ${baseBranch ?? 'HEAD~10'}`;
-    const squash = Bun.spawn(['sh', '-c', squashCmd], {
-      cwd: worktreePath,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    await squash.exited;
+    const squashOk = await autosquash(worktreePath, baseBranch);
+    if (!squashOk) {
+      onEvent?.({
+        type: 'error',
+        message:
+          'Autosquash failed — fixup commits are preserved. Run `git rebase -i --autosquash` manually.',
+      });
+    }
   }
 
   void hasQuorum; // used for future messaging
   onEvent?.({ type: 'review:done', fixes: appliedFixes });
   return { reviewed: true, fixes: appliedFixes };
+}
+
+// ── Git helpers for fix application ─────────────────────────────────────
+
+/**
+ * Stage all changes and create a fixup commit targeting the original SHA.
+ * Returns the new commit SHA on success, undefined if nothing to commit.
+ */
+async function commitFixup(workdir: string, fix: TriageVerdict): Promise<string | undefined> {
+  const add = Bun.spawn(['git', 'add', '-A'], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const addStderr = await new Response(add.stderr).text();
+  const addExit = await add.exited;
+
+  if (addExit !== 0) {
+    console.warn(`[pacifista] git add failed: ${addStderr}`);
+    return undefined;
+  }
+
+  const message = fix.sha ? `fixup! ${fix.sha}` : `review: ${fix.description}`;
+
+  const commit = Bun.spawn(['git', 'commit', '-m', message], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(commit.stdout).text(),
+    new Response(commit.stderr).text(),
+    commit.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    if (stderr.includes('nothing to commit')) return undefined;
+    console.warn(`[pacifista] fixup commit failed: ${stderr}`);
+    return undefined;
+  }
+
+  const shaMatch = stdout.match(/\[\S+\s+([a-f0-9]+)\]/);
+  return shaMatch?.[1];
+}
+
+/**
+ * Run autosquash rebase to fold fixup commits into their targets.
+ * Returns true on success, false on failure (e.g. conflicts).
+ */
+async function autosquash(workdir: string, baseBranch?: string): Promise<boolean> {
+  const target = baseBranch ?? 'HEAD~10';
+  const squash = Bun.spawn(
+    ['sh', '-c', `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash ${target}`],
+    { cwd: workdir, stdout: 'pipe', stderr: 'pipe' },
+  );
+
+  const stderr = await new Response(squash.stderr).text();
+  const exitCode = await squash.exited;
+
+  if (exitCode !== 0) {
+    // Abort the failed rebase so the worktree isn't left in a broken state
+    const abort = Bun.spawn(['git', 'rebase', '--abort'], {
+      cwd: workdir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    await abort.exited;
+
+    console.warn(`[pacifista] autosquash failed: ${stderr}`);
+    return false;
+  }
+
+  return true;
 }
 
 /**

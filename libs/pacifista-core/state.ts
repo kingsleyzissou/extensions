@@ -184,6 +184,7 @@ function applyEvent(state: RunState | null, event: JournalEvent): RunState | nul
       }
       return state;
     }
+
     case 'task:checked': {
       if (!state) return state;
       const task = state.tasks.find(t => t.id === event.taskId);

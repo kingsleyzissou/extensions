@@ -214,9 +214,13 @@ export default function (pi: ExtensionAPI) {
           }
         };
 
+        emitProgress(`Quorum: 0/${reviewers.length} reviewers complete`);
+
         await runWithConcurrency(reviewers, MAX_CONCURRENCY, async (reviewer, index) => {
           const agentPath = path.join(agentsDir, reviewer.agentFile);
-          const result = await runReviewer(reviewCwd, agentPath, task, ctx.signal);
+          const result = await runReviewer(reviewCwd, agentPath, task, ctx.signal, {
+            allowPaths: [tmpDir],
+          });
 
           results[index] = {
             reviewer: reviewer.name,

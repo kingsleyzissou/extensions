@@ -6,13 +6,15 @@ import * as p from '@clack/prompts';
 import {
   runPlan,
   parsePlan,
+  loadConfig,
   getJournalPath,
   journalExists,
   replayState,
+  runReviewStage,
 } from '@kingsleyzissou/pacifista-core';
 import type { DeepPartial, PacifistaConfig } from '@kingsleyzissou/pacifista-core';
 import { createEventRenderer } from './tui/events.ts';
-import { presentGate } from './tui/gate.ts';
+import { presentGate, presentTriageGate } from './tui/gate.ts';
 import { isBareRepo, isSandboxAvailable, listWorktrees, selectWorktree } from './tui/detect.ts';
 
 // ── Arg parsing ─────────────────────────────────────────────────────────
@@ -23,14 +25,16 @@ kuma — plan executor with QC gates and user approval
 Usage:
   kuma [execute] [<plan.md>] [-w <worktree>] [options]
   kuma resume [-w <worktree>]
+  kuma review [-w <worktree>]
   kuma status [-w <worktree>]
   kuma init [-w <worktree>]
 
 Commands:
-  execute   Execute a markdown plan file (default if omitted)
-  resume    Resume a stopped run
-  status    Show status of a run
-  init      Initialize .kuma/ in a project
+  execute     Execute a markdown plan file (default if omitted)
+  resume      Resume a stopped run
+  review      Run the ensemble review stage on the current branch
+  status      Show status of a run
+  init        Initialize .kuma/ in a project
 
 Options:
   -w, --worktree <path>     Path to the git worktree (auto-detected)
@@ -74,7 +78,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let i = 0;
 
   // Check if first arg is a known command
-  const commands = ['execute', 'resume', 'status', 'init'];
+  const commands = ['execute', 'resume', 'review', 'status', 'init'];
   if (args[0] && commands.includes(args[0])) {
     result.command = args[0];
     i = 1;
@@ -393,6 +397,7 @@ async function cmdExecute(args: ParsedArgs) {
       },
       handler,
       presentGate,
+      presentTriageGate,
     );
 
     p.outro(
@@ -435,6 +440,7 @@ async function cmdResume(args: ParsedArgs) {
       },
       handler,
       presentGate,
+      presentTriageGate,
     );
 
     p.outro(
@@ -484,6 +490,54 @@ async function cmdStatus(args: ParsedArgs) {
 
   p.note(lines.join('\n'), 'Tasks');
   p.outro('');
+}
+
+async function cmdReview(args: ParsedArgs) {
+  const worktree = await resolveWorktree(args.worktree);
+  const config = await loadConfig(worktree);
+
+  if (!config.review.baseBranch) {
+    p.log.error('No baseBranch configured. Set review.baseBranch in .kuma/config.js');
+    process.exit(1);
+  }
+
+  p.intro('kuma — review');
+
+  // Use the journal if one exists (to persist review results for flashback)
+  const journalPath = await getJournalPath(worktree);
+  const hasJournal = await journalExists(journalPath);
+
+  if (!hasJournal) {
+    p.log.info('No journal found — review results will not be persisted.');
+  }
+
+  const { handler, stopSpinner } = createEventRenderer();
+
+  try {
+    const result = await runReviewStage(
+      worktree,
+      config,
+      hasJournal ? journalPath : undefined,
+      handler,
+      presentGate,
+      presentTriageGate,
+    );
+
+    if (result.reviewed) {
+      p.outro(
+        result.fixes > 0
+          ? `Review complete (${result.fixes} fixes applied)`
+          : 'Review complete — no fixes needed',
+      );
+    } else {
+      p.outro('Review did not complete');
+      process.exit(1);
+    }
+  } catch (err) {
+    stopSpinner();
+    p.log.error(`Review failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }
 
 async function cmdInit(args: ParsedArgs) {
@@ -556,6 +610,9 @@ async function main() {
       break;
     case 'status':
       await cmdStatus(args);
+      break;
+    case 'review':
+      await cmdReview(args);
       break;
     case 'init':
       await cmdInit(args);
