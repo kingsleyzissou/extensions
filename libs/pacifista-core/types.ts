@@ -95,7 +95,7 @@ export type JournalEvent =
   | {
       type: 'review:completed';
       reviewData: ReviewData;
-      verdicts: TriageVerdictData[];
+      verdicts: TriageVerdict[];
       reviewSessionId?: string;
       triageSessionId?: string;
       ts: string;
@@ -242,7 +242,7 @@ export type PacifistaEvent =
   | { type: 'review:start' }
   | { type: 'review:reviewing'; message?: string }
   | { type: 'review:triage' }
-  | { type: 'review:verdicts'; verdicts: TriageVerdictData[] }
+  | { type: 'review:verdicts'; verdicts: TriageVerdict[] }
   | { type: 'review:applying'; total: number }
   | { type: 'review:fix'; current: number; total: number; description: string }
   | { type: 'review:done'; fixes: number }
@@ -272,7 +272,7 @@ export type ReviewData = {
   }[];
 };
 
-export type TriageVerdictData = {
+export type TriageVerdict = {
   id: number;
   verdict: 'fix' | 'defer' | 'pushback';
   sha?: string;
@@ -285,5 +285,5 @@ export type TriageVerdictData = {
  * If not provided, all "fix" verdicts are applied automatically.
  */
 export type TriageGateHandler = (
-  verdicts: TriageVerdictData[],
-) => Promise<TriageVerdictData[]>;
+  verdicts: TriageVerdict[],
+) => Promise<TriageVerdict[]>;
