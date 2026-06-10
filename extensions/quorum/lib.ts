@@ -184,6 +184,7 @@ export async function runReviewer(
     'json',
     '-p',
     '--no-session',
+    '--noc',
     '--provider',
     REVIEWER_PROVIDER,
     '--model',
