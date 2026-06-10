@@ -69,6 +69,7 @@ export type JournalEvent =
       tasks: { id: number; title: string }[];
     }
   | { type: 'task:started'; taskId: number; attempt: number; sessionId?: string; ts: string }
+  | { type: 'task:session'; taskId: number; attempt: number; sessionId: string; ts: string }
   | {
       type: 'task:checked';
       taskId: number;
