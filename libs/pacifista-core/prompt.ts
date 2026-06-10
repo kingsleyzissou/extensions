@@ -1,4 +1,4 @@
-import type { Plan, PlanTask, PromptConfig } from './types.ts';
+import type { Check, Plan, PlanTask, PromptConfig } from './types.ts';
 
 export function buildTaskPrompt(
   plan: Plan,
@@ -6,6 +6,7 @@ export function buildTaskPrompt(
   options: {
     revision?: string;
     promptConfig?: PromptConfig;
+    checks?: Check[];
   } = {},
 ): string {
   const sections: string[] = [];
@@ -38,17 +39,26 @@ export function buildTaskPrompt(
     sections.push(`## Files\n\n${task.fields['files']}`);
   }
 
-  // TDD instructions
-  sections.push(
-    [
-      '## Approach',
-      '',
-      '1. Write tests first (colocated `.test.ts` files next to source)',
-      '2. Implement until tests pass',
-      '3. Run the typechecker to verify',
-      '4. Ensure linting passes',
-    ].join('\n'),
-  );
+  // TDD instructions with the exact commands from config
+  const approach = [
+    '## Approach',
+    '',
+    '1. Write tests first (colocated `.test.ts` files next to source)',
+    '2. Implement until tests pass',
+    '3. Verify all checks pass before finishing',
+  ];
+
+  if (options.checks?.length) {
+    approach.push('');
+    approach.push(
+      'Use these exact commands for verification — do NOT use npx or other alternatives:',
+    );
+    for (const check of options.checks) {
+      approach.push(`- **${check.name}**: \`${check.command}\``);
+    }
+  }
+
+  sections.push(approach.join('\n'));
 
   // Revision feedback
   if (options.revision) {
@@ -113,7 +123,7 @@ export function buildTriagePrompt(
 /**
  * Build a fix prompt for applying a single review fix.
  */
-export function buildFixPrompt(description: string, _sha: string): string {
+export function buildFixPrompt(description: string): string {
   return [
     `Fix the following issue:\n\n${description}`,
     '',
