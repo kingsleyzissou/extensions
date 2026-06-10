@@ -131,6 +131,7 @@ export async function runPlan(
       const prompt = buildTaskPrompt(plan, task, {
         revision,
         promptConfig: config.prompt,
+        checks: config.checks,
       });
 
       onEvent({
