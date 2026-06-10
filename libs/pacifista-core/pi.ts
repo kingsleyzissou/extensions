@@ -22,6 +22,7 @@ function buildBaseArgs(options?: PiExecOptions): string[] {
 
 type StreamEvent = {
   type: string;
+  id?: string;
   toolName?: string;
   toolCallId?: string;
   args?: Record<string, unknown>;
@@ -32,6 +33,79 @@ type StreamEvent = {
   result?: unknown;
   isError?: boolean;
 };
+
+/**
+ * Read a ReadableStream line-by-line and parse each line as JSON.
+ * Calls `onEvent` for every successfully parsed event.
+ */
+async function readJsonStream(
+  stream: ReadableStream<Uint8Array>,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        onEvent(JSON.parse(line) as StreamEvent);
+      } catch {
+        // Skip non-JSON lines
+      }
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim()) {
+    try {
+      onEvent(JSON.parse(buffer) as StreamEvent);
+    } catch {
+      // Skip
+    }
+  }
+}
+
+/** Extract session ID from a stream event. */
+function extractSessionId(event: StreamEvent): string | undefined {
+  return event.type === 'session' && event.id ? event.id : undefined;
+}
+
+/**
+ * Read a ReadableStream line-by-line as plain text.
+ * Calls `onLine` for every non-empty line.
+ */
+async function readLineStream(
+  stream: ReadableStream<Uint8Array>,
+  onLine: (line: string) => void,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (line) onLine(line);
+    }
+  }
+
+  if (buffer.trim()) onLine(buffer);
+}
 
 /**
  * Execute a prompt via `pi --mode json` and emit events for each
@@ -52,42 +126,12 @@ export async function piStream(
     stderr: 'pipe',
   });
 
-  const reader = proc.stdout.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let sessionId: string | undefined;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as StreamEvent;
-        if (event.type === 'session' && 'id' in event) {
-          sessionId = (event as StreamEvent & { id: string }).id;
-        }
-        emitFromStreamEvent(event, onEvent);
-      } catch {
-        // Skip non-JSON lines
-      }
-    }
-  }
-
-  // Process remaining buffer
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as StreamEvent;
-      emitFromStreamEvent(event, onEvent);
-    } catch {
-      // Skip
-    }
-  }
+  await readJsonStream(proc.stdout, event => {
+    sessionId ??= extractSessionId(event);
+    emitFromStreamEvent(event, onEvent);
+  });
 
   const exitCode = await proc.exited;
   return { exitCode, sessionId };
@@ -172,56 +216,20 @@ export async function piCaptureWithSession(
     stderr: 'pipe',
   });
 
-  const reader = proc.stdout.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let sessionId: string | undefined;
   let textOutput = '';
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as StreamEvent;
-        if (event.type === 'session' && 'id' in event) {
-          sessionId = (event as StreamEvent & { id: string }).id;
-        }
-        // Reassemble text output from text_delta events
-        if (
-          event.type === 'message_update' &&
-          event.assistantMessageEvent?.type === 'text_delta' &&
-          event.assistantMessageEvent.delta
-        ) {
-          textOutput += event.assistantMessageEvent.delta;
-        }
-      } catch {
-        // Skip non-JSON lines
-      }
+  await readJsonStream(proc.stdout, event => {
+    sessionId ??= extractSessionId(event);
+    // Reassemble text output from text_delta events
+    if (
+      event.type === 'message_update' &&
+      event.assistantMessageEvent?.type === 'text_delta' &&
+      event.assistantMessageEvent.delta
+    ) {
+      textOutput += event.assistantMessageEvent.delta;
     }
-  }
-
-  // Process remaining buffer
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as StreamEvent;
-      if (
-        event.type === 'message_update' &&
-        event.assistantMessageEvent?.type === 'text_delta' &&
-        event.assistantMessageEvent.delta
-      ) {
-        textOutput += event.assistantMessageEvent.delta;
-      }
-    } catch {
-      // Skip
-    }
-  }
+  });
 
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
@@ -264,68 +272,28 @@ export async function piReview(
     stderr: 'pipe',
   });
 
-  // Stream stdout for session ID (--mode json)
-  const stdoutReader = proc.stdout.getReader();
-  const stdoutDecoder = new TextDecoder();
-  let stdoutBuffer = '';
   let sessionId: string | undefined;
 
-  const parseStdoutLine = (line: string) => {
-    if (!line.trim()) return;
-    try {
-      const event = JSON.parse(line) as StreamEvent;
-      if (event.type === 'session' && 'id' in event) {
-        sessionId = (event as StreamEvent & { id: string }).id;
-      }
-    } catch {
-      // Skip non-JSON lines
-    }
-  };
-
   // Stream stderr for progress lines, collect the rest
-  const stderrReader = proc.stderr.getReader();
-  const stderrDecoder = new TextDecoder();
-  let stderrBuffer = '';
   const stderrLines: string[] = [];
 
-  const parseStderrLine = (line: string) => {
-    if (line.startsWith(KUMA_PROGRESS_PREFIX) && onEvent) {
-      onEvent({
-        type: 'review:reviewing',
-        message: line.slice(KUMA_PROGRESS_PREFIX.length),
-      });
-    } else {
-      stderrLines.push(line);
-    }
-  };
-
   // Read both streams concurrently
-  const readStdout = async () => {
-    for (;;) {
-      const { done, value } = await stdoutReader.read();
-      if (done) break;
-      stdoutBuffer += stdoutDecoder.decode(value, { stream: true });
-      const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop() ?? '';
-      for (const line of lines) parseStdoutLine(line);
-    }
-    if (stdoutBuffer.trim()) parseStdoutLine(stdoutBuffer);
-  };
+  await Promise.all([
+    readJsonStream(proc.stdout, event => {
+      sessionId ??= extractSessionId(event);
+    }),
+    readLineStream(proc.stderr, line => {
+      if (line.startsWith(KUMA_PROGRESS_PREFIX) && onEvent) {
+        onEvent({
+          type: 'review:reviewing',
+          message: line.slice(KUMA_PROGRESS_PREFIX.length),
+        });
+      } else {
+        stderrLines.push(line);
+      }
+    }),
+  ]);
 
-  const readStderr = async () => {
-    for (;;) {
-      const { done, value } = await stderrReader.read();
-      if (done) break;
-      stderrBuffer += stderrDecoder.decode(value, { stream: true });
-      const lines = stderrBuffer.split('\n');
-      stderrBuffer = lines.pop() ?? '';
-      for (const line of lines) parseStderrLine(line);
-    }
-    if (stderrBuffer.trim()) stderrLines.push(stderrBuffer);
-  };
-
-  await Promise.all([readStdout(), readStderr()]);
   const exitCode = await proc.exited;
-
   return { exitCode, stdout: '', stderr: stderrLines.join('\n'), sessionId };
 }

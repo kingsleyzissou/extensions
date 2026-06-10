@@ -39,21 +39,36 @@ export function buildTaskPrompt(
     sections.push(`## Files\n\n${task.fields['files']}`);
   }
 
-  // TDD instructions with the exact commands from config
-  const approach = [
-    '## Approach',
-    '',
-    '1. Write tests first (colocated `.test.ts` files next to source)',
-    '2. Implement until tests pass',
-    '3. Verify all checks pass before finishing',
-  ];
+  // Approach section — TDD by default, simplified for config-only tasks
+  const isTdd = task.fields['tdd']?.toLowerCase() !== 'false';
 
-  if (options.checks?.length) {
+  const approach = isTdd
+    ? [
+        '## Approach',
+        '',
+        '1. Write tests first (colocated `.test.ts` files next to source)',
+        '2. Implement until tests pass',
+        '3. Verify all checks pass before finishing',
+      ]
+    : [
+        '## Approach',
+        '',
+        'This is a configuration / scaffolding task — no tests are needed.',
+        '',
+        '1. Make the required changes',
+        '2. Verify all checks pass before finishing',
+      ];
+
+  // Filter out tdd-scoped checks for config tasks so the agent
+  // isn't told to run tests that won't be enforced.
+  const applicableChecks = isTdd ? options.checks : options.checks?.filter(c => c.scope !== 'tdd');
+
+  if (applicableChecks?.length) {
     approach.push('');
     approach.push(
       'Use these exact commands for verification — do NOT use npx or other alternatives:',
     );
-    for (const check of options.checks) {
+    for (const check of applicableChecks) {
       approach.push(`- **${check.name}**: \`${check.command}\``);
     }
   }

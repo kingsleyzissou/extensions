@@ -7,7 +7,7 @@ export { piStream, piCapture, piCaptureWithSession, piReview } from './pi.ts';
 export { buildTaskPrompt, buildTriagePrompt, buildFixPrompt } from './prompt.ts';
 export { runChecks } from './checks.ts';
 export { runReviewStage } from './review.ts';
-export { detectBareRepoRoot } from './git.ts';
+export { detectBareRepoRoot, getHead, getChangedFiles, stageAndCommit, autosquash } from './git.ts';
 
 // Types
 export type {
