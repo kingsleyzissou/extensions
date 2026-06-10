@@ -10,8 +10,8 @@
     "build": "bun run --filter '*' build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --fix",
+    "lint:check": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
