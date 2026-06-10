@@ -39,9 +39,8 @@ export type {
   EventHandler,
   DeepPartial,
   ReviewData,
-  TriageVerdictData,
+  TriageVerdict,
   TriageGateHandler,
 } from './types.ts';
 
 export type { GateHandler } from './runner.ts';
-export type { TriageVerdict } from './review.ts';

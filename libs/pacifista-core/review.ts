@@ -6,7 +6,7 @@ import type {
   PacifistaConfig,
   ReviewData,
   TriageGateHandler,
-  TriageVerdictData,
+  TriageVerdict,
 } from './types.ts';
 import type { GateHandler } from './runner.ts';
 import { piCaptureWithSession, piReview, piStream } from './pi.ts';
@@ -24,13 +24,6 @@ import { getChangedFiles, stageAndCommit, autosquash } from './git.ts';
  * and triage both read from the host filesystem.
  */
 const REVIEW_PI_OPTS = { sandbox: false, noSandbox: true } as const;
-
-export type TriageVerdict = {
-  id: number;
-  verdict: 'fix' | 'defer' | 'pushback';
-  sha?: string;
-  description: string;
-};
 
 /**
  * Check whether the quorum extension (@kingsleyzissou/quorum) is available.
@@ -126,7 +119,7 @@ export async function runReviewStage(
     await appendEvent(journalPath, {
       type: 'review:completed',
       reviewData,
-      verdicts: verdicts as TriageVerdictData[],
+      verdicts,
       reviewSessionId: reviewResult.sessionId,
       triageSessionId: triageResult.sessionId,
       ts: new Date().toISOString(),
@@ -134,7 +127,7 @@ export async function runReviewStage(
   }
 
   // Present all verdicts so the TUI can display the full triage result
-  onEvent?.({ type: 'review:verdicts', verdicts: verdicts as TriageVerdictData[] });
+  onEvent?.({ type: 'review:verdicts', verdicts });
 
   // Gate: let the user decide which fixes to apply.
   // Without a triage gate, all "fix" verdicts are applied automatically.
