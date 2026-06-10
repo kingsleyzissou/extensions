@@ -14,7 +14,7 @@ import {
 } from '@kingsleyzissou/pacifista-core';
 import type { DeepPartial, PacifistaConfig } from '@kingsleyzissou/pacifista-core';
 import { createEventRenderer } from './tui/events.ts';
-import { presentGate, presentTriageGate } from './tui/gate.ts';
+import { createGate, presentTriageGate } from './tui/gate.ts';
 import { isBareRepo, isSandboxAvailable, listWorktrees, selectWorktree } from './tui/detect.ts';
 
 // ── Arg parsing ─────────────────────────────────────────────────────────
@@ -27,6 +27,7 @@ Usage:
   kuma resume [-w <worktree>]
   kuma review [-w <worktree>]
   kuma status [-w <worktree>]
+  kuma flashback [-w <worktree>]
   kuma init [-w <worktree>]
 
 Commands:
@@ -34,6 +35,7 @@ Commands:
   resume      Resume a stopped run
   review      Run the ensemble review stage on the current branch
   status      Show status of a run
+  flashback   Browse past agent sessions (alias: inspect)
   init        Initialize .kuma/ in a project
 
 Options:
@@ -78,9 +80,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let i = 0;
 
   // Check if first arg is a known command
-  const commands = ['execute', 'resume', 'review', 'status', 'init'];
+  const commands = ['execute', 'resume', 'review', 'status', 'flashback', 'inspect', 'init'];
   if (args[0] && commands.includes(args[0])) {
-    result.command = args[0];
+    result.command = args[0] === 'inspect' ? 'flashback' : args[0];
     i = 1;
   }
 
@@ -396,7 +398,7 @@ async function cmdExecute(args: ParsedArgs) {
         configOverrides: buildConfigOverrides(args),
       },
       handler,
-      presentGate,
+      createGate(worktree),
       presentTriageGate,
     );
 
@@ -429,17 +431,18 @@ async function cmdResume(args: ParsedArgs) {
   p.intro('kuma — resuming');
 
   try {
+    const worktreePath = resolve(state.worktreePath);
     const result = await runPlan(
       {
         planPath: resolve(state.planPath),
-        worktreePath: resolve(state.worktreePath),
+        worktreePath,
         startFromTask: state.currentTask,
         commitPerTask: args.commitPerTask,
         skipReview: args.skipReview,
         configOverrides: buildConfigOverrides(args),
       },
       handler,
-      presentGate,
+      createGate(worktreePath),
       presentTriageGate,
     );
 
@@ -492,6 +495,94 @@ async function cmdStatus(args: ParsedArgs) {
   p.outro('');
 }
 
+async function cmdFlashback(args: ParsedArgs) {
+  const worktree = await resolveWorktree(args.worktree);
+  const journalPath = await getJournalPath(worktree);
+
+  if (!(await journalExists(journalPath))) {
+    p.log.info('No runs found.');
+    return;
+  }
+
+  const state = await replayState(journalPath);
+
+  p.intro('kuma — flashback');
+
+  // Build options from tasks that have session IDs
+  type SessionOption = {
+    label: string;
+    hint: string;
+    sessionId: string;
+  };
+  const sessions: SessionOption[] = [];
+
+  for (const task of state.tasks) {
+    for (let i = 0; i < task.attempts.length; i++) {
+      const attempt = task.attempts[i]!;
+      if (attempt.sessionId) {
+        const icon = task.status === 'approved' ? '✓' : task.status === 'rejected' ? '✗' : '·';
+        const attemptLabel = task.attempts.length > 1 ? ` (attempt ${i + 1})` : '';
+        sessions.push({
+          label: `${icon} Task ${task.id}: ${task.title}${attemptLabel}`,
+          hint: attempt.sessionId.slice(0, 8),
+          sessionId: attempt.sessionId,
+        });
+      }
+    }
+  }
+
+  // Add review/triage session if available
+  if (state.triageSessionId) {
+    sessions.push({
+      label: '◈ Review triage',
+      hint: state.triageSessionId.slice(0, 8),
+      sessionId: state.triageSessionId,
+    });
+  }
+
+  if (sessions.length === 0) {
+    p.log.warn('No agent sessions recorded for this run.');
+    p.log.info('Session IDs are captured from runs using pi --mode json.');
+    p.outro('');
+    return;
+  }
+
+  // Loop so user can inspect multiple sessions before exiting
+  for (;;) {
+    const selected = await p.select({
+      message: 'Select a session to inspect',
+      options: [
+        ...sessions.map(s => ({
+          value: s.sessionId,
+          label: s.label,
+          hint: s.hint,
+        })),
+        { value: '__exit__', label: 'Exit' },
+      ],
+    });
+
+    if (p.isCancel(selected) || selected === '__exit__') {
+      break;
+    }
+
+    // Open pi in read-only mode without a container.
+    // --no-tools disables all tool execution so the session is view-only.
+    // --no-container avoids spinning up a sandbox for pure inspection.
+    //
+    // spawnSync blocks the event loop entirely so clack's stdin
+    // listeners can't race with the child for keypresses. The
+    // child gets exclusive terminal access until it exits.
+    Bun.spawnSync(['pi', '--session', selected, '--no-tools', '--no-container', '--approve'], {
+      cwd: worktree,
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+  }
+
+  p.outro('');
+}
+
 async function cmdReview(args: ParsedArgs) {
   const worktree = await resolveWorktree(args.worktree);
   const config = await loadConfig(worktree);
@@ -519,7 +610,7 @@ async function cmdReview(args: ParsedArgs) {
       config,
       hasJournal ? journalPath : undefined,
       handler,
-      presentGate,
+      createGate(worktree),
       presentTriageGate,
     );
 
@@ -610,6 +701,9 @@ async function main() {
       break;
     case 'status':
       await cmdStatus(args);
+      break;
+    case 'flashback':
+      await cmdFlashback(args);
       break;
     case 'review':
       await cmdReview(args);

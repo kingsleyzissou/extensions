@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { unlink } from 'node:fs/promises';
 import type { EventHandler, PacifistaConfig, ReviewData, TriageVerdictData } from './types.ts';
 import type { GateHandler } from './runner.ts';
-import { piCapture, piCaptureWithSession, piReview } from './pi.ts';
+import { piCaptureWithSession, piReview, piStream } from './pi.ts';
 import { buildFixPrompt, buildTriagePrompt } from './prompt.ts';
 import { runChecks } from './checks.ts';
 import { appendEvent } from './state.ts';
@@ -161,24 +161,31 @@ export async function runReviewStage(
       description: fix.description,
     });
 
-    const fixResult = await piCapture(
-      buildFixPrompt(fix.description, fix.sha),
-      worktreePath,
-      REVIEW_PI_OPTS,
+    // Use piStream so tool calls are visible in the TUI, with a
+    // timeout to prevent the agent from hanging indefinitely.
+    const fixResult = await withTimeout(
+      piStream(buildFixPrompt(fix.description, fix.sha), worktreePath, REVIEW_PI_OPTS, onEvent),
+      2 * 60_000, // 2 minute timeout per fix
     );
 
+    if (!fixResult) {
+      onEvent?.({ type: 'error', message: `Fix #${fix.id} timed out after 2 minutes` });
+      continue;
+    }
+
     if (fixResult.exitCode !== 0) {
-      onEvent?.({ type: 'error', message: `Fix #${fix.id} failed: ${fixResult.stderr}` });
+      onEvent?.({ type: 'error', message: `Fix #${fix.id} failed (exit ${fixResult.exitCode})` });
       continue;
     }
 
     const checksResult = await runChecks(worktreePath, config.checks, 'task');
 
     if (onGate) {
+      const fixChangedFiles = await getChangedFiles(worktreePath);
       const action = await onGate(
         { id: fix.id, title: fix.description, body: '', fields: {} },
         1,
-        [],
+        fixChangedFiles,
         checksResult,
         config.gate,
       );
@@ -188,7 +195,7 @@ export async function runReviewStage(
     // Commit the fix on the host with --fixup so autosquash can
     // fold it into the original commit. This mirrors how the normal
     // task flow commits — the agent never runs git commit itself.
-    const commitSha = await commitFixup(worktreePath, fix);
+    const commitSha = await commitFixup(worktreePath, fix, config.format);
     if (commitSha) {
       appliedFixes++;
     }
@@ -213,11 +220,56 @@ export async function runReviewStage(
 
 // ── Git helpers for fix application ─────────────────────────────────────
 
+async function getChangedFiles(workdir: string): Promise<string[]> {
+  // Modified/deleted tracked files
+  const diff = Bun.spawn(['git', 'diff', '--name-only', 'HEAD'], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const diffOut = await new Response(diff.stdout).text();
+  await diff.exited;
+
+  // New untracked files (e.g. dotfiles like .prettierrc)
+  const untracked = Bun.spawn(['git', 'ls-files', '--others', '--exclude-standard'], {
+    cwd: workdir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const untrackedOut = await new Response(untracked.stdout).text();
+  await untracked.exited;
+
+  const files = new Set<string>();
+  for (const f of diffOut.split('\n')) {
+    const trimmed = f.trim();
+    if (trimmed) files.add(trimmed);
+  }
+  for (const f of untrackedOut.split('\n')) {
+    const trimmed = f.trim();
+    if (trimmed) files.add(trimmed);
+  }
+
+  return [...files];
+}
+
 /**
  * Stage all changes and create a fixup commit targeting the original SHA.
  * Returns the new commit SHA on success, undefined if nothing to commit.
  */
-async function commitFixup(workdir: string, fix: TriageVerdict): Promise<string | undefined> {
+async function commitFixup(
+  workdir: string,
+  fix: TriageVerdict,
+  formatCmd?: string,
+): Promise<string | undefined> {
+  // Run formatter before staging so commit hooks have nothing to change
+  if (formatCmd) {
+    Bun.spawnSync(['sh', '-c', formatCmd], {
+      cwd: workdir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+  }
+
   const add = Bun.spawn(['git', 'add', '-A'], {
     cwd: workdir,
     stdout: 'pipe',
@@ -332,5 +384,19 @@ function parseVerdicts(output: string): TriageVerdict[] {
       `[pacifista] parseVerdicts: JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
     );
     return [];
+  }
+}
+
+// ── Timeout helper ──────────────────────────────────────────────────────
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<null>(resolve => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
   }
 }
