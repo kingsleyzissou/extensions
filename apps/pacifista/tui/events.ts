@@ -8,6 +8,16 @@ function formatCommand(raw: string): string {
   return raw.replace(/\\\n/g, ' ').replace(/\n/g, ' && ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Build the auto-retry status message shown to the user.
+ *
+ * Example: `⟳ Checks failed — auto-retrying (attempt 3, 1 auto-retry remaining)`
+ */
+export function formatAutoRetryMessage(attempt: number, retriesRemaining: number): string {
+  const plural = retriesRemaining === 1 ? 'auto-retry' : 'auto-retries';
+  return `⟳ Checks failed — auto-retrying (attempt ${attempt}, ${retriesRemaining} ${plural} remaining)`;
+}
+
 function formatElapsed(startTime: number): string {
   const elapsed = Math.floor((Date.now() - startTime) / 1000);
   const mins = Math.floor(elapsed / 60);
@@ -157,6 +167,14 @@ export function createEventRenderer(): {
       case 'checks:done': {
         const summary = event.result.checks.map(c => `${c.name} ${c.status}`).join(' · ');
         stopSpinner(`Checks: ${summary}`);
+        break;
+      }
+
+      case 'checks:auto-retry': {
+        const msg = formatAutoRetryMessage(event.attempt, event.retriesRemaining);
+        stopSpinner(msg);
+        startSpinner();
+        setStatus('agent restarting (auto-retry)...');
         break;
       }
 
