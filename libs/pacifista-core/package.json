@@ -6,5 +6,8 @@
   "type": "module",
   "keywords": [
     "pacifista"
-  ]
+  ],
+  "dependencies": {
+    "@kingsleyzissou/core": "workspace:*"
+  }
 }

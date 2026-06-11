@@ -28,7 +28,7 @@ export async function loadConfig(
   cliOverrides?: DeepPartial<PacifistaConfig>,
   projectRoot?: string,
 ): Promise<PacifistaConfig> {
-  const root = projectRoot ?? (await detectBareRepoRoot(worktreePath));
+  const root = projectRoot ?? detectBareRepoRoot(worktreePath) ?? undefined;
   const fileConfig = await findAndLoadConfig(worktreePath, root);
   return deepMerge(DEFAULTS, fileConfig, cliOverrides ?? {});
 }

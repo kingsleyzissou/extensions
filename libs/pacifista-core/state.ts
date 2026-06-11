@@ -31,7 +31,7 @@ export async function getJournalPath(worktreePath: string): Promise<string> {
   }
   const stateHome = home;
 
-  const detectedRoot = await detectBareRepoRoot(worktreePath);
+  const detectedRoot = detectBareRepoRoot(worktreePath);
   const root = resolve(detectedRoot ?? worktreePath);
   const projectName = basename(root);
   const shortHash = hashString(root).slice(0, 6);

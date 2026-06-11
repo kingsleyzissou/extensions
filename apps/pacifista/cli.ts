@@ -175,10 +175,10 @@ async function wizard(args: ParsedArgs): Promise<ParsedArgs> {
   // 1. Resolve worktree
   if (!args.worktree) {
     const cwd = process.cwd();
-    const bare = await isBareRepo(cwd);
+    const bare = isBareRepo(cwd);
 
     if (bare) {
-      const worktrees = await listWorktrees(cwd);
+      const worktrees = listWorktrees(cwd);
       if (worktrees.length === 0) {
         p.log.error('Bare repo detected but no worktrees found.');
         process.exit(1);
@@ -367,9 +367,9 @@ async function cmdExecute(args: ParsedArgs) {
     // Still resolve worktree interactively if not provided
     if (!args.worktree) {
       const cwd = process.cwd();
-      const bare = await isBareRepo(cwd);
+      const bare = isBareRepo(cwd);
       if (bare) {
-        const worktrees = await listWorktrees(cwd);
+        const worktrees = listWorktrees(cwd);
         if (worktrees.length > 0) {
           const selected = await selectWorktree(worktrees);
           if (!selected) {

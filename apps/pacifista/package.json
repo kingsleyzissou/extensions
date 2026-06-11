@@ -8,6 +8,7 @@
     "kuma": "./cli.ts"
   },
   "dependencies": {
+    "@kingsleyzissou/core": "workspace:*",
     "@kingsleyzissou/pacifista-core": "workspace:*",
     "@clack/core": "1.4.1",
     "@clack/prompts": "1.5.1"
