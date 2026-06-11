@@ -38,6 +38,12 @@ export type Check = {
    *    should be skipped on config/scaffolding tasks.
    */
   scope?: 'task' | 'final' | 'both' | 'tdd';
+  /** Mark this check as flaky. When true, `runChecks` will retry the
+   *  check up to `retries` times (default 1) before marking it failed. */
+  flaky?: boolean;
+  /** Number of retry attempts for flaky checks. Defaults to 1.
+   *  Ignored when `flaky` is not true. */
+  retries?: number;
 };
 
 export type PiConfig = {
@@ -90,6 +96,14 @@ export type JournalEvent =
     }
   | { type: 'task:approved'; taskId: number; attempt: number; commitSha?: string; ts: string }
   | { type: 'task:revised'; taskId: number; attempt: number; feedback: string; ts: string }
+  | {
+      type: 'checks:auto-retry';
+      taskId: number;
+      attempt: number;
+      retriesRemaining: number;
+      checksResult: ChecksResult;
+      ts: string;
+    }
   | { type: 'task:rejected'; taskId: number; attempt: number; stop: boolean; ts: string }
   | { type: 'task:skipped'; taskId: number; ts: string }
   | {
@@ -138,6 +152,9 @@ export type CheckResult = {
   name: string;
   status: 'pass' | 'fail';
   output?: string;
+  /** True when the check definition has `flaky: true`. Useful for
+   *  downstream rendering (e.g. showing a warning badge in the gate). */
+  flaky?: boolean;
 };
 
 export type ChecksResult = {
@@ -155,6 +172,9 @@ export type RunOptions = {
   skipReview?: boolean;
   /** Maximum revision attempts per task before aborting. Defaults to 5. */
   maxAttempts?: number;
+  /** Maximum auto-retries on check failure before presenting the gate.
+   *  Distinct from `maxAttempts` which caps total attempts. Defaults to 2. */
+  maxAutoRetries?: number;
   configOverrides?: DeepPartial<PacifistaConfig>;
 };
 
@@ -225,6 +245,13 @@ export type PacifistaEvent =
   | { type: 'agent:thinking' }
   | { type: 'checks:start' }
   | { type: 'checks:done'; result: ChecksResult }
+  | {
+      type: 'checks:auto-retry';
+      taskId: number;
+      attempt: number;
+      retriesRemaining: number;
+      checksResult: ChecksResult;
+    }
   | {
       type: 'gate:needed';
       task: PlanTask;

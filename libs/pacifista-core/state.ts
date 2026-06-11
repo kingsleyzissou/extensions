@@ -258,6 +258,7 @@ function applyEvent(state: RunState | null, event: JournalEvent): RunState | nul
       return state;
     }
 
+    case 'checks:auto-retry':
     case 'run:paused':
     case 'run:completed':
       return state;
