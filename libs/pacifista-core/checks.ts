@@ -69,11 +69,23 @@ export async function runChecks(
 
   for (const check of applicable) {
     validateCommand(check.command);
-    const result = await runShell(workdir, check.command);
+
+    let result = await runShell(workdir, check.command);
+
+    // Retry flaky checks up to `retries` times (default 1) before
+    // marking them as failed.
+    if (!result.ok && check.flaky) {
+      const maxRetries = check.retries ?? 1;
+      for (let retry = 0; retry < maxRetries && !result.ok; retry++) {
+        result = await runShell(workdir, check.command);
+      }
+    }
+
     results.push({
       name: check.name,
       status: result.ok ? 'pass' : 'fail',
       ...(result.ok ? {} : { output: (result.stdout + result.stderr).trim() }),
+      ...(check.flaky ? { flaky: true } : {}),
     });
   }
 
