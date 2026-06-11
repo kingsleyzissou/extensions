@@ -584,6 +584,10 @@ function loadSandboxProjectConfig(hostCwd: string): SandboxProjectConfig {
     let git: GitIdentity | null = null;
     if (parsed.git?.user?.name && parsed.git?.user?.email) {
       git = { user: { name: parsed.git.user.name, email: parsed.git.user.email } };
+    } else if (parsed.git !== undefined) {
+      console.warn(
+        `sandbox: ignoring malformed "git" field in ${configPath} — expected { user: { name, email } }`,
+      );
     }
     return {
       image: parsed.image ?? DEFAULT_SANDBOX_PROJECT_CONFIG.image,
