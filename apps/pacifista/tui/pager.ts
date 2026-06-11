@@ -24,53 +24,57 @@ export async function pager(text: string, title?: string): Promise<void> {
     viewportHeight = Math.max(1, totalRows - headerLines - footerLines);
   }
 
-  const p = new Prompt<void>({
-    render() {
-      recomputeViewport();
-      const totalCols = getColumns(process.stdout);
+  const p = new Prompt<void>(
+    {
+      render() {
+        recomputeViewport();
+        const totalCols = getColumns(process.stdout);
 
-      // Clamp scroll offset
-      const maxOffset = Math.max(0, lines.length - viewportHeight);
-      scrollOffset = Math.min(scrollOffset, maxOffset);
+        // Clamp scroll offset
+        const maxOffset = Math.max(0, lines.length - viewportHeight);
+        scrollOffset = Math.min(scrollOffset, maxOffset);
 
-      const visibleLines = lines.slice(scrollOffset, scrollOffset + viewportHeight);
+        const visibleLines = lines.slice(scrollOffset, scrollOffset + viewportHeight);
 
-      // Build the frame
-      const parts: string[] = [];
+        // Build the frame
+        const parts: string[] = [];
 
-      const bar = styleText('gray', '│');
-      const tee = styleText('gray', '├');
+        const bar = styleText('gray', '│');
+        const tee = styleText('gray', '├');
 
-      if (title) {
+        if (title) {
+          parts.push(bar);
+          parts.push(`${bar}  ${styleText('bold', title)}`);
+        }
+
+        for (const line of visibleLines) {
+          // Truncate long lines to terminal width (account for bar prefix)
+          const maxLen = totalCols - 4;
+          const truncated = line.length > maxLen ? line.slice(0, maxLen) : line;
+          parts.push(`${bar}  ${truncated}`);
+        }
+
+        // Pad if content is shorter than viewport
+        for (let i = visibleLines.length; i < viewportHeight; i++) {
+          parts.push(bar);
+        }
+
+        // Footer with scroll position
+        const position =
+          lines.length <= viewportHeight
+            ? ''
+            : ` ${styleText('dim', `${scrollOffset + 1}-${Math.min(scrollOffset + viewportHeight, lines.length)} of ${lines.length}`)}`;
+        const hint = styleText('dim', '↑/↓ scroll · q quit');
+        parts.push(`${tee}  ${hint}${position}`);
         parts.push(bar);
-        parts.push(`${bar}  ${styleText('bold', title)}`);
-      }
 
-      for (const line of visibleLines) {
-        // Truncate long lines to terminal width (account for bar prefix)
-        const maxLen = totalCols - 4;
-        const truncated = line.length > maxLen ? line.slice(0, maxLen) : line;
-        parts.push(`${bar}  ${truncated}`);
-      }
-
-      // Pad if content is shorter than viewport
-      for (let i = visibleLines.length; i < viewportHeight; i++) {
-        parts.push(bar);
-      }
-
-      // Footer with scroll position
-      const position = lines.length <= viewportHeight
-        ? ''
-        : ` ${styleText('dim', `${scrollOffset + 1}-${Math.min(scrollOffset + viewportHeight, lines.length)} of ${lines.length}`)}`;
-      const hint = styleText('dim', '↑/↓ scroll · q quit');
-      parts.push(`${tee}  ${hint}${position}`);
-      parts.push(bar);
-
-      return parts.join('\n');
+        return parts.join('\n');
+      },
     },
-  }, false);
+    false,
+  );
 
-  p.on('cursor', (action) => {
+  p.on('cursor', action => {
     const maxOffset = Math.max(0, lines.length - viewportHeight);
 
     switch (action) {
@@ -94,22 +98,22 @@ export async function pager(text: string, title?: string): Promise<void> {
     }
 
     // Space for page down
-    if (key?.name === 'space') {
+    if (key.name === 'space') {
       scrollOffset = Math.min(maxOffset, scrollOffset + pageSize);
       return;
     }
 
     // Page up/down
-    if (key?.name === 'pagedown' || (key?.name === 'd' && key?.ctrl)) {
+    if (key.name === 'pagedown' || (key.name === 'd' && key.ctrl)) {
       scrollOffset = Math.min(maxOffset, scrollOffset + pageSize);
-    } else if (key?.name === 'pageup' || (key?.name === 'u' && key?.ctrl)) {
+    } else if (key.name === 'pageup' || (key.name === 'u' && key.ctrl)) {
       scrollOffset = Math.max(0, scrollOffset - pageSize);
     }
 
     // Home/End
-    if (key?.name === 'home' || char === 'g') {
+    if (key.name === 'home' || char === 'g') {
       scrollOffset = 0;
-    } else if (key?.name === 'end' || char === 'G') {
+    } else if (key.name === 'end' || char === 'G') {
       scrollOffset = maxOffset;
     }
   });
@@ -118,5 +122,3 @@ export async function pager(text: string, title?: string): Promise<void> {
   // isCancel means they pressed escape/ctrl-c — that's fine too
   if (isCancel(result)) return;
 }
-
-
