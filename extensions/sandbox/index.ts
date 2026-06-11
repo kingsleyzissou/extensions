@@ -63,14 +63,22 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { resolve as resolvePath } from 'node:path';
+import {
+  isBareRepo,
+  detectBareRepoRoot,
+  listWorktrees,
+  type WorktreeInfo,
+} from '@kingsleyzissou/core';
 import {
   type BashOperations,
   createBashTool,
@@ -155,6 +163,88 @@ function loadSandboxConfig(hostCwd: string): SandboxConfig | null {
     // Invalid JSON or missing sandbox key
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Bare repo worktree detection & git path fixup
+// ---------------------------------------------------------------------------
+
+/** A worktree that is a sibling of the bare repo root (under hostCwd). */
+interface SiblingWorktree extends WorktreeInfo {
+  /** Relative path from hostCwd to the worktree directory. */
+  relPath: string;
+}
+
+/**
+ * Find worktrees that live under hostCwd (siblings in a bare repo).
+ * Uses core detection from @kingsleyzissou/core, then filters to
+ * worktrees whose paths are children of hostCwd and computes relPath.
+ */
+function findSiblingWorktrees(hostCwd: string): SiblingWorktree[] | null {
+  if (!isBareRepo(hostCwd)) return null;
+
+  const worktrees = listWorktrees(hostCwd);
+  const siblings: SiblingWorktree[] = [];
+
+  for (const wt of worktrees) {
+    if (!wt.path.startsWith(hostCwd + '/')) continue;
+    // Verify the .git pointer file exists in the worktree
+    if (!existsSync(resolvePath(wt.path, '.git'))) continue;
+    siblings.push({
+      ...wt,
+      relPath: wt.path.slice(hostCwd.length + 1),
+    });
+  }
+
+  return siblings.length > 0 ? siblings : null;
+}
+
+interface GitShadowMounts {
+  /** Temp directory holding the shadow files (cleaned up on exit) */
+  tmpDir: string;
+  /** Mount specs to shadow-mount over the original files */
+  mounts: MountSpec[];
+}
+
+/**
+ * Create temporary files with corrected git paths for container use,
+ * and return mount specs that shadow the originals inside the container.
+ *
+ * For each worktree:
+ *   - <worktree>/.git       → "gitdir: /workspace/worktrees/<name>"
+ *   - worktrees/<name>/gitdir → "/workspace/<relPath>/.git"
+ *
+ * The host files are never modified — Podman file-over-file bind mounts
+ * shadow them inside the container.
+ */
+function createGitShadowMounts(hostCwd: string, worktrees: SiblingWorktree[]): GitShadowMounts {
+  const hash = createHash('sha256').update(hostCwd).digest('hex').slice(0, 8);
+  const tmpDir = mkdtempSync(resolvePath(tmpdir(), `pi-sandbox-git-${hash}-`));
+  const mounts: MountSpec[] = [];
+
+  for (const wt of worktrees) {
+    // 1. Shadow the .git file in the worktree directory
+    //    Original: "gitdir: /absolute/host/path/worktrees/<name>"
+    //    Fixed:    "gitdir: /workspace/worktrees/<name>"
+    const dotGitShadow = resolvePath(tmpDir, `${wt.name}-dotgit`);
+    writeFileSync(dotGitShadow, `gitdir: ${REMOTE_ROOT}/worktrees/${wt.name}\n`);
+    mounts.push({
+      source: dotGitShadow,
+      target: `${REMOTE_ROOT}/${wt.relPath}/.git`,
+    });
+
+    // 2. Shadow the gitdir reverse-pointer in the worktree metadata
+    //    Original: "/absolute/host/path/<worktree>/.git"
+    //    Fixed:    "/workspace/<relPath>/.git"
+    const gitdirShadow = resolvePath(tmpDir, `${wt.name}-gitdir`);
+    writeFileSync(gitdirShadow, `${REMOTE_ROOT}/${wt.relPath}/.git\n`);
+    mounts.push({
+      source: gitdirShadow,
+      target: `${REMOTE_ROOT}/worktrees/${wt.name}/gitdir`,
+    });
+  }
+
+  return { tmpDir, mounts };
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +517,8 @@ interface Sandbox {
   isReusable: boolean;
   /** Whether this sandbox was reattached (vs newly created). */
   isReattached: boolean;
+  /** Temp directory for git shadow mount files (cleaned up with container). */
+  gitShadowDir?: string;
 }
 
 let sandbox: Sandbox | null = null;
@@ -1360,6 +1452,29 @@ export default function (pi: ExtensionAPI) {
       // Discover skill directories on the host.
       const skillMounts = mountSkills ? discoverSkillDirs(extraPaths) : [];
 
+      // Detect bare repo worktree structure and create git path fixups.
+      // When pi runs from a bare repo root, worktree .git files contain
+      // absolute host paths that don't resolve inside the container.
+      // We shadow-mount corrected files so git works transparently.
+      let gitShadowInfo: GitShadowMounts | null = null;
+      const siblingWorktrees = findSiblingWorktrees(localCwd);
+      if (siblingWorktrees) {
+        gitShadowInfo = createGitShadowMounts(localCwd, siblingWorktrees);
+      } else {
+        // Warn if running from a worktree — the bare repo isn't in the
+        // container mount, so git commands will likely fail.
+        const bareRoot = detectBareRepoRoot(localCwd);
+        if (bareRoot) {
+          ctx.ui.notify(
+            `⚠ Running sandbox from a worktree inside a bare repo.\n` +
+              `  Bare repo root: ${bareRoot}\n` +
+              `  Git commands inside the sandbox may not work correctly.\n` +
+              `  Consider running pi from the bare repo root instead.`,
+            'warning',
+          );
+        }
+      }
+
       // Check if a container with this name already exists:
       //   - Running  → reattach (crash recovery, persist mode, or concurrent session)
       //   - Stopped  → start if reusable/persist, otherwise remove for fresh slate
@@ -1442,6 +1557,10 @@ export default function (pi: ExtensionAPI) {
       if (pidsFlag !== undefined) resources.pidsLimit = pidsFlag;
       if (swapFlag !== undefined) resources.swap = swapFlag;
 
+      // Combine skill mounts with git shadow mounts (if any)
+      const gitMounts = gitShadowInfo?.mounts ?? [];
+      const allMounts = [...skillMounts, ...gitMounts];
+
       // Create new sandbox if not reattaching
       let actualName = sandboxName;
       if (!isReattached) {
@@ -1450,7 +1569,7 @@ export default function (pi: ExtensionAPI) {
           image,
           hostCwd: localCwd,
           allowNetwork,
-          extraMounts: skillMounts.length ? skillMounts : undefined,
+          extraMounts: allMounts.length ? allMounts : undefined,
           resources,
           cacheVolume,
         });
@@ -1468,6 +1587,7 @@ export default function (pi: ExtensionAPI) {
         projectConfig,
         isReusable,
         isReattached,
+        gitShadowDir: gitShadowInfo?.tmpDir,
       };
 
       // Cleanup handler — stop & remove container unless keep/persist is set
@@ -1481,6 +1601,14 @@ export default function (pi: ExtensionAPI) {
           s.runtime.remove(s.name);
         } catch {
           /* ignore */
+        }
+        // Clean up git shadow mount temp files
+        if (s.gitShadowDir) {
+          try {
+            rmSync(s.gitShadowDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
         }
         sandbox = null;
       };
