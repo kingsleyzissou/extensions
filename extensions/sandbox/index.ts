@@ -815,6 +815,41 @@ function shq(s: string): string {
 // Container exec helpers
 // ---------------------------------------------------------------------------
 
+function execArgv(sbx: Sandbox, argv: string[], timeoutMs?: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(sbx.runtime.bin, ['exec', sbx.name, ...argv], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let timedOut = false;
+
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+        }, timeoutMs)
+      : undefined;
+
+    child.stdout.on('data', d => out.push(d));
+    child.stderr.on('data', d => err.push(d));
+    child.on('error', e => {
+      if (timer) clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', code => {
+      if (timer) clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`exec timed out after ${timeoutMs}ms: ${argv.join(' ')}`));
+      } else if (code !== 0) {
+        reject(new Error(`exec failed (${code}): ${Buffer.concat(err).toString()}`));
+      } else {
+        resolve(Buffer.concat(out));
+      }
+    });
+  });
+}
+
 function execCapture(sbx: Sandbox, command: string, timeoutMs?: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn(sbx.runtime.bin, ['exec', sbx.name, 'sh', '-c', command], {
@@ -1462,10 +1497,14 @@ export default function (pi: ExtensionAPI) {
       const gitId = projectConfig.git ?? (await detectHostGitIdentity());
       if (gitId) {
         try {
-          await execCapture(sandbox, `git config --global user.name ${shq(gitId.user.name)}`, 5000);
-          await execCapture(
+          await execArgv(
             sandbox,
-            `git config --global user.email ${shq(gitId.user.email)}`,
+            ['git', 'config', '--global', 'user.name', gitId.user.name],
+            5000,
+          );
+          await execArgv(
+            sandbox,
+            ['git', 'config', '--global', 'user.email', gitId.user.email],
             5000,
           );
         } catch {
