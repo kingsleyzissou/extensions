@@ -207,7 +207,7 @@ function captureDiff(cwd: string, args: string[]): string {
     stderr: 'pipe',
     // Set COLUMNS so tools that can't detect width from a pipe
     // (e.g. diff viewers) size their output to fit the pager viewport.
-    env: { ...process.env, COLUMNS: String((process.stdout.columns ?? 80) - 4) },
+    env: { ...process.env, COLUMNS: String(process.stdout.columns - 4) },
   }).stdout.toString();
 }
 
