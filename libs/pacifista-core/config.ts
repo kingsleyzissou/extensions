@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { DeepPartial, PacifistaConfig } from './types.ts';
 import { detectBareRepoRoot } from './git.ts';
 
-const DEFAULTS: PacifistaConfig = {
+export const DEFAULTS: PacifistaConfig = {
   checks: [
     { name: 'typecheck', command: 'npm run typecheck' },
     { name: 'lint', command: 'npm run lint' },
@@ -81,7 +81,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function deepMerge(...sources: Array<DeepPartial<PacifistaConfig>>): PacifistaConfig {
+export function deepMerge(...sources: Array<DeepPartial<PacifistaConfig>>): PacifistaConfig {
   const result = { ...sources[0] } as Record<string, unknown>;
 
   for (let i = 1; i < sources.length; i++) {
@@ -91,7 +91,10 @@ function deepMerge(...sources: Array<DeepPartial<PacifistaConfig>>): PacifistaCo
       if (value === undefined) continue;
       const existing = result[key];
       if (isPlainObject(existing) && isPlainObject(value)) {
-        result[key] = { ...existing, ...value };
+        const filtered = Object.fromEntries(
+          Object.entries(value).filter(([, v]) => v !== undefined),
+        );
+        result[key] = { ...existing, ...filtered };
       } else {
         result[key] = value;
       }
