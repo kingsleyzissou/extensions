@@ -1,0 +1,39 @@
+name: Container Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'extensions/sandbox/containers/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'extensions/sandbox/containers/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build container
+        run: |
+          podman build \
+            --platform linux/${{ matrix.arch }} \
+            -t pi-sandbox:latest \
+            -f extensions/sandbox/containers/Containerfile \
+            extensions/sandbox/containers
