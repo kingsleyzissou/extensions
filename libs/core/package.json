@@ -1,0 +1,8 @@
+{
+  "name": "@kingsleyzissou/core",
+  "version": "0.1.0",
+  "description": "Shared utilities — git bare repo detection, worktree enumeration, and filesystem helpers",
+  "module": "index.ts",
+  "type": "module",
+  "keywords": []
+}
