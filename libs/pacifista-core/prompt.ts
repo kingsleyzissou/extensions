@@ -42,13 +42,16 @@ export function buildTaskPrompt(
   // Approach section — TDD by default, simplified for config-only tasks
   const isTdd = task.fields['tdd']?.toLowerCase() !== 'false';
 
+  // Filter out tdd-scoped checks for config tasks so the agent
+  // isn't told to run tests that won't be enforced.
+  const applicableChecks = isTdd ? options.checks : options.checks?.filter(c => c.scope !== 'tdd');
+
   const approach = isTdd
     ? [
         '## Approach',
         '',
         '1. Write tests first (colocated `.test.ts` files next to source)',
         '2. Implement until tests pass',
-        '3. Verify all checks pass before finishing',
       ]
     : [
         '## Approach',
@@ -56,21 +59,20 @@ export function buildTaskPrompt(
         'This is a configuration / scaffolding task — no tests are needed.',
         '',
         '1. Make the required changes',
-        '2. Verify all checks pass before finishing',
       ];
 
-  // Filter out tdd-scoped checks for config tasks so the agent
-  // isn't told to run tests that won't be enforced.
-  const applicableChecks = isTdd ? options.checks : options.checks?.filter(c => c.scope !== 'tdd');
-
   if (applicableChecks?.length) {
-    approach.push('');
     approach.push(
-      'Use these exact commands for verification — do NOT use npx or other alternatives:',
+      `${isTdd ? '3' : '2'}. Run ALL of the following checks and fix any failures before finishing:`,
     );
+    approach.push('');
     for (const check of applicableChecks) {
       approach.push(`- **${check.name}**: \`${check.command}\``);
     }
+    approach.push('');
+    approach.push(
+      'Do not finish until every check passes. If a check fails, fix the issue and re-run it.',
+    );
   }
 
   sections.push(approach.join('\n'));
