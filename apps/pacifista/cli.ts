@@ -50,18 +50,18 @@ Options:
 If no command or plan file is provided, kuma runs an interactive wizard.
 `;
 
-type ParsedArgs = {
+export type ParsedArgs = {
   command: string;
   planPath?: string;
   worktree?: string;
   startFrom?: number;
   commitPerTask: boolean;
   skipReview: boolean;
-  sandbox: boolean;
-  noSandbox: boolean;
+  sandbox: boolean | undefined;
+  noSandbox: boolean | undefined;
 };
 
-function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
 
   if (args.includes('-h') || args.includes('--help')) {
@@ -73,8 +73,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     command: 'execute',
     commitPerTask: true,
     skipReview: false,
-    sandbox: false,
-    noSandbox: false,
+    sandbox: undefined,
+    noSandbox: undefined,
   };
 
   let i = 0;
@@ -347,10 +347,11 @@ async function resolveWorktree(explicit?: string): Promise<string> {
   return resolved;
 }
 
-function buildConfigOverrides(args: ParsedArgs): DeepPartial<PacifistaConfig> {
-  return {
-    pi: { sandbox: args.sandbox, noSandbox: args.noSandbox },
-  };
+export function buildConfigOverrides(args: ParsedArgs): DeepPartial<PacifistaConfig> {
+  const pi: DeepPartial<PacifistaConfig['pi']> = {};
+  if (args.sandbox !== undefined) pi.sandbox = args.sandbox;
+  if (args.noSandbox !== undefined) pi.noSandbox = args.noSandbox;
+  return { pi };
 }
 
 // ── Commands ────────────────────────────────────────────────────────────
