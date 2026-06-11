@@ -176,6 +176,53 @@ export type RunOptions = {
    *  Distinct from `maxAttempts` which caps total attempts. Defaults to 2. */
   maxAutoRetries?: number;
   configOverrides?: DeepPartial<PacifistaConfig>;
+  /** Override internal dependencies (for testing). */
+  deps?: Partial<RunDeps>;
+};
+
+// Re-declare the dep signatures directly to avoid `typeof import()`
+// which is forbidden by consistent-type-imports.
+
+/** Injectable dependencies for the runner. All fields are optional;
+ *  omitted entries fall back to the real implementations. */
+export type RunDeps = {
+  piStream: (
+    prompt: string,
+    worktreePath: string,
+    opts: { sandbox?: boolean; noSandbox?: boolean },
+    onEvent: EventHandler,
+  ) => Promise<{ exitCode: number; stdout: string; stderr: string; sessionId?: string }>;
+  runChecks: (
+    workdir: string,
+    checks: Check[],
+    scope: 'task' | 'final',
+    options?: { tdd?: boolean },
+  ) => Promise<ChecksResult>;
+  getHead: (workdir: string) => Promise<string>;
+  getChangedFiles: (workdir: string, base?: string) => Promise<string[]>;
+  stageAndCommit: (
+    workdir: string,
+    message: string,
+    format?: { command?: string },
+  ) => Promise<string | undefined>;
+  getJournalPath: (worktreePath: string) => Promise<string>;
+  journalExists: (journalPath: string) => Promise<boolean>;
+  appendEvent: (journalPath: string, event: Record<string, unknown>) => Promise<void>;
+  replayState: (journalPath: string) => Promise<RunState>;
+  runReviewStage: (
+    worktreePath: string,
+    config: PacifistaConfig,
+    journalPath: string | undefined,
+    onEvent?: EventHandler,
+    onGate?: (
+      task: PlanTask,
+      attempt: number,
+      changedFiles: string[],
+      checksResult: ChecksResult,
+      config: GateConfig,
+    ) => Promise<GateAction>,
+    onTriageGate?: TriageGateHandler,
+  ) => Promise<{ reviewed: boolean; fixes: number }>;
 };
 
 export type RunResult = {

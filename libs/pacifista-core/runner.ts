@@ -13,12 +13,34 @@ import type {
 } from './types.ts';
 import { loadConfig } from './config.ts';
 import { parsePlan } from './plan.ts';
-import { appendEvent, getJournalPath, journalExists, replayState } from './state.ts';
-import { piStream } from './pi.ts';
+import {
+  appendEvent as _appendEvent,
+  getJournalPath as _getJournalPath,
+  journalExists as _journalExists,
+  replayState as _replayState,
+} from './state.ts';
+import { piStream as _piStream } from './pi.ts';
 import { buildTaskPrompt } from './prompt.ts';
-import { runChecks } from './checks.ts';
-import { runReviewStage } from './review.ts';
-import { getHead, getChangedFiles, stageAndCommit } from './git.ts';
+import { runChecks as _runChecks } from './checks.ts';
+import { runReviewStage as _runReviewStage } from './review.ts';
+import {
+  getHead as _getHead,
+  getChangedFiles as _getChangedFiles,
+  stageAndCommit as _stageAndCommit,
+} from './git.ts';
+
+const defaultDeps = {
+  piStream: _piStream,
+  runChecks: _runChecks,
+  getHead: _getHead,
+  getChangedFiles: _getChangedFiles,
+  stageAndCommit: _stageAndCommit,
+  getJournalPath: _getJournalPath,
+  journalExists: _journalExists,
+  appendEvent: _appendEvent,
+  replayState: _replayState,
+  runReviewStage: _runReviewStage,
+};
 import type { TriageGateHandler } from './types.ts';
 
 export type GateHandler = (
@@ -42,6 +64,19 @@ export async function runPlan(
   onGate: GateHandler,
   onTriageGate?: TriageGateHandler,
 ): Promise<RunResult> {
+  const {
+    piStream,
+    runChecks,
+    getHead,
+    getChangedFiles,
+    stageAndCommit,
+    getJournalPath,
+    journalExists,
+    appendEvent,
+    replayState,
+    runReviewStage,
+  } = { ...defaultDeps, ...options.deps };
+
   const config = await loadConfig(options.worktreePath, options.configOverrides);
 
   const planMarkdown = await Bun.file(options.planPath).text();
@@ -50,7 +85,21 @@ export async function runPlan(
   onEvent({ type: 'plan:loaded', plan });
 
   const journalPath = await getJournalPath(options.worktreePath);
-  const state = await loadOrCreateState(journalPath, options, plan);
+
+  // Load existing state or create a new run
+  let state: RunState;
+  if (await journalExists(journalPath)) {
+    state = await replayState(journalPath);
+  } else {
+    await appendEvent(journalPath, {
+      type: 'run:started',
+      planPath: options.planPath,
+      worktreePath: options.worktreePath,
+      ts: new Date().toISOString(),
+      tasks: plan.tasks.map(t => ({ id: t.id, title: t.title })),
+    });
+    state = await replayState(journalPath);
+  }
 
   const ctx: RunContext = {
     worktreePath: options.worktreePath,
@@ -100,6 +149,8 @@ export async function runPlan(
     let approved = false;
     let revision: string | undefined;
     const maxAttempts = options.maxAttempts ?? 5;
+    const maxAutoRetries = options.maxAutoRetries ?? 2;
+    let autoRetriesUsed = 0;
 
     while (!approved) {
       // Re-resolve after replays from prior iterations
@@ -204,6 +255,35 @@ export async function runPlan(
       });
 
       onEvent({ type: 'checks:done', result: checksResult });
+
+      // Auto-retry: if checks failed and auto-retries remain, skip the
+      // gate and re-run the agent with the check output as feedback.
+      const autoRetriesLeft = maxAutoRetries - autoRetriesUsed;
+      if (!checksResult.passed && autoRetriesLeft > 0) {
+        autoRetriesUsed++;
+
+        const feedback = formatCheckFeedback(checksResult);
+
+        onEvent({
+          type: 'checks:auto-retry',
+          taskId: task.id,
+          attempt: attemptNum,
+          retriesRemaining: autoRetriesLeft - 1,
+          checksResult,
+        });
+
+        await appendEvent(journalPath, {
+          type: 'checks:auto-retry',
+          taskId: task.id,
+          attempt: attemptNum,
+          retriesRemaining: autoRetriesLeft - 1,
+          checksResult,
+          ts: new Date().toISOString(),
+        });
+
+        revision = feedback;
+        continue;
+      }
 
       // Gate
       onEvent({
@@ -317,27 +397,6 @@ export async function runPlan(
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-async function loadOrCreateState(
-  journalPath: string,
-  options: RunOptions,
-  plan: Plan,
-): Promise<RunState> {
-  if (await journalExists(journalPath)) {
-    return replayState(journalPath);
-  }
-
-  // New run — write the initial event
-  await appendEvent(journalPath, {
-    type: 'run:started',
-    planPath: options.planPath,
-    worktreePath: options.worktreePath,
-    ts: new Date().toISOString(),
-    tasks: plan.tasks.map(t => ({ id: t.id, title: t.title })),
-  });
-
-  return replayState(journalPath);
-}
-
 /**
  * Build a commit message from a task.
  *
@@ -374,6 +433,27 @@ async function execCapture(command: string, cwd: string): Promise<ExecResult> {
 
   const exitCode = await proc.exited;
   return { exitCode, stdout, stderr };
+}
+
+/**
+ * Format check results into revision feedback for auto-retry.
+ *
+ * Produces a clear summary of which checks failed and their output
+ * so the agent knows exactly what to fix.
+ */
+function formatCheckFeedback(checksResult: ChecksResult): string {
+  const lines: string[] = ['Quality checks failed. Fix these issues:'];
+
+  for (const check of checksResult.checks) {
+    const icon = check.status === 'pass' ? '✓ pass' : '✗ fail';
+    lines.push('');
+    lines.push(`${check.name}: ${icon}`);
+    if (check.status === 'fail' && check.output) {
+      lines.push(check.output);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 function buildResult(state: RunState): RunResult {
