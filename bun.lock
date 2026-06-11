@@ -26,6 +26,7 @@
       "dependencies": {
         "@clack/core": "1.4.1",
         "@clack/prompts": "1.5.1",
+        "@kingsleyzissou/core": "workspace:*",
         "@kingsleyzissou/pacifista-core": "workspace:*",
       },
     },
@@ -56,6 +57,9 @@
     "libs/pacifista-core": {
       "name": "@kingsleyzissou/pacifista-core",
       "version": "0.1.0",
+      "dependencies": {
+        "@kingsleyzissou/core": "workspace:*",
+      },
     },
   },
   "packages": {
