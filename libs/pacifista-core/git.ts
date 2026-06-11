@@ -123,7 +123,9 @@ export async function stageAndCommit(
     });
     if (fmt.exitCode !== 0) {
       const stderr = fmt.stderr.toString().trim();
-      console.warn(`[pacifista] formatter exited with code ${fmt.exitCode}${stderr ? `: ${stderr}` : ''}`);
+      console.warn(
+        `[pacifista] formatter exited with code ${fmt.exitCode}${stderr ? `: ${stderr}` : ''}`,
+      );
     }
   }
 

@@ -284,6 +284,4 @@ export type TriageVerdict = {
  * are applied. Returns the subset of verdicts to actually fix.
  * If not provided, all "fix" verdicts are applied automatically.
  */
-export type TriageGateHandler = (
-  verdicts: TriageVerdict[],
-) => Promise<TriageVerdict[]>;
+export type TriageGateHandler = (verdicts: TriageVerdict[]) => Promise<TriageVerdict[]>;

@@ -65,7 +65,7 @@ Push back when:
 
 1. **Read** the full review output
 2. **For each finding**, assign a verdict with one-sentence reasoning
-3. **Be specific** in pushbacks — say *why* the reviewer is wrong,
+3. **Be specific** in pushbacks — say _why_ the reviewer is wrong,
    not just that they are
 4. **Be honest** about deferrals — distinguish "this can wait" from
    "I don't want to do this"
