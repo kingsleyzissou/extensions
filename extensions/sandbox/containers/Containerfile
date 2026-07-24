@@ -29,12 +29,18 @@ RUN dnf5 install -y --setopt=install_weak_deps=False \
         fd-find \
         file \
         findutils \
+        gcc \
+        go \
         git \
+        gpgme \
         jq \
+        krb5-devel \
         less \
         libatomic \
+        libvirt-devel \
         make \
         nodejs \
+        pkg-config \
         python3 \
         python3-pip \
         ripgrep \
