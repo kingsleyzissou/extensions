@@ -148,7 +148,7 @@ export async function runPlan(
 
     let approved = false;
     let revision: string | undefined;
-    const maxAttempts = options.maxAttempts ?? 5;
+    const maxAttempts = options.maxAttempts ?? 8;
     const maxAutoRetries = options.maxAutoRetries ?? 2;
     let autoRetriesUsed = 0;
 
@@ -183,6 +183,7 @@ export async function runPlan(
         revision,
         promptConfig: config.prompt,
         checks: config.checks,
+        worktreePath: options.worktreePath,
       });
 
       onEvent({

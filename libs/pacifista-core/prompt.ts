@@ -7,6 +7,7 @@ export function buildTaskPrompt(
     revision?: string;
     promptConfig?: PromptConfig;
     checks?: Check[];
+    worktreePath?: string;
   } = {},
 ): string {
   const sections: string[] = [];
@@ -84,15 +85,23 @@ export function buildTaskPrompt(
     );
   }
 
-  // Explicit instruction: do NOT commit
-  sections.push(
-    [
-      '## Important',
+  // Explicit instruction: stay in worktree, do NOT commit
+  const important = ['## Important', ''];
+
+  if (options.worktreePath) {
+    important.push(
+      `Your working directory is: ${options.worktreePath}`,
+      'Stay in this directory. Do not navigate to or modify files in other worktrees.',
       '',
-      'Do NOT run `git commit`. The orchestrator will handle committing',
-      'your changes after they pass quality checks.',
-    ].join('\n'),
+    );
+  }
+
+  important.push(
+    'Do NOT run `git commit`. The orchestrator will handle committing',
+    'your changes after they pass quality checks.',
   );
+
+  sections.push(important.join('\n'));
 
   return sections.join('\n\n');
 }

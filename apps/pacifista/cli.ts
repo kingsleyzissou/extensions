@@ -431,8 +431,14 @@ async function cmdResume(args: ParsedArgs) {
 
   p.intro('kuma — resuming');
 
+  // Honor explicit --worktree over the journal's recorded path
+  const worktreePath = args.worktree ? worktree : resolve(state.worktreePath);
+
+  if (args.worktree && resolve(state.worktreePath) !== worktreePath) {
+    p.log.warn(`Overriding journal worktree: ${state.worktreePath} → ${worktreePath}`);
+  }
+
   try {
-    const worktreePath = resolve(state.worktreePath);
     const result = await runPlan(
       {
         planPath: resolve(state.planPath),
