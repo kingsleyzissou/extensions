@@ -1301,10 +1301,16 @@ export default function (pi: ExtensionAPI) {
   });
 
   const localCwd = process.cwd();
-  const localRead = createReadTool(localCwd);
-  const localWrite = createWriteTool(localCwd);
-  const localEdit = createEditTool(localCwd);
-  const localBash = createBashTool(localCwd);
+  // pi's AgentTool type omits the ctx param (5th arg) built-in tools accept at runtime;
+  // forwarding it is required for PI_* session env injection (e.g. PI_MODEL)
+  type CtxTool = {
+    execute: (id: string, params: any, signal: any, onUpdate: any, ctx: any) => any;
+  };
+  const withCtx = <T extends object>(t: T): T & CtxTool => t as T & CtxTool;
+  const localRead = withCtx(createReadTool(localCwd));
+  const localWrite = withCtx(createWriteTool(localCwd));
+  const localEdit = withCtx(createEditTool(localCwd));
+  const localBash = withCtx(createBashTool(localCwd));
 
   // Initialize the persistent path approval store
   pathApprovals = new PathApprovalStore(getAgentDir());
@@ -1334,28 +1340,28 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     ...localRead,
-    async execute(id, params, signal, onUpdate, _ctx) {
+    async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
-      if (!sbx) return localRead.execute(id, params, signal, onUpdate);
-      await guardExternalRead(params.path, sbx, _ctx);
+      if (!sbx) return localRead.execute(id, params, signal, onUpdate, ctx);
+      await guardExternalRead(params.path, sbx, ctx);
       const tool = createReadTool(localCwd, { operations: readOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
   pi.registerTool({
     ...localWrite,
-    async execute(id, params, signal, onUpdate, _ctx) {
+    async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
-      if (!sbx) return localWrite.execute(id, params, signal, onUpdate);
+      if (!sbx) return localWrite.execute(id, params, signal, onUpdate, ctx);
       const tool = createWriteTool(localCwd, { operations: writeOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
   pi.registerTool({
     ...localEdit,
-    async execute(id, params, signal, onUpdate, _ctx) {
+    async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
-      if (!sbx) return localEdit.execute(id, params, signal, onUpdate);
+      if (!sbx) return localEdit.execute(id, params, signal, onUpdate, ctx);
       const tool = createEditTool(localCwd, { operations: editOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -1363,9 +1369,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...localBash,
     label: 'bash (sandboxed)',
-    async execute(id, params, signal, onUpdate, _ctx) {
+    async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
-      if (!sbx) return localBash.execute(id, params, signal, onUpdate);
+      if (!sbx) return localBash.execute(id, params, signal, onUpdate, ctx);
       const tool = createBashTool(localCwd, { operations: bashOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
