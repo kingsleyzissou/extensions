@@ -109,6 +109,18 @@ Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
 The trailer goes after the body, separated by a blank line. If there is
 no body, place it directly after the subject with one blank line.
 
+## Invocation Flags
+
+When invoked as `/skill:commit-message`, arguments may include:
+
+| Flag                 | Meaning                                                    |
+| -------------------- | ---------------------------------------------------------- |
+| `--no-coauthor`      | Omit the `Co-authored-by` trailer entirely                 |
+| `--component <name>` | Use `<name>` as the subject prefix instead of inferring it |
+
+Flags combine freely; any other argument text is treated as extra context
+for the commit. Without flags, follow the rules above unchanged.
+
 ## Reviewing Commits
 
 When reviewing commit messages, check for:
