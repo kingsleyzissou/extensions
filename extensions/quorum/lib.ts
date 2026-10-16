@@ -72,8 +72,8 @@ export const REVIEWERS: ReviewerDef[] = [
   },
 ];
 
-export const REVIEWER_PROVIDER = 'anthropic-vertex';
-export const REVIEWER_MODEL = 'claude-sonnet-4-6';
+export const REVIEWER_PROVIDER = 'openai';
+export const REVIEWER_MODEL = 'gpt-6.1-luna';
 export const REVIEWER_TOOLS = ['read'];
 export const MAX_CONCURRENCY = 4;
 
