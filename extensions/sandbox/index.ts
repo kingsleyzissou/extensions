@@ -5,12 +5,12 @@
  * Original author: Sawyer Cutler (https://github.com/TheGreatAxios)
  * Adapted to use Podman instead of Docker.
  *
- * Run every read/write/edit/bash operation pi performs inside a per-session
- * Linux container (Podman).
+ * Run every read/write/edit/bash operation pi performs inside a persistent,
+ * repository-scoped Linux container (Podman).
  *
  * Threat model:
- *   - The agent's bash and file tools never touch the host filesystem outside
- *     the project cwd, which is bind-mounted into the container at /workspace.
+ *   - The agent's bash and file tools run in the project workspace mounted at
+ *     /workspace. Bare-repo worktrees share that mount and persistent container.
  *   - The agent runs as a non-root user (uid 1000) inside the container.
  *   - No host secrets are mounted (no $HOME, ~/.ssh, ~/.aws, ~/.config, no
  *     SSH agent, no container socket).
@@ -21,8 +21,8 @@
  *     Override with --container-size or individual --container-memory, --container-cpus, etc.
  *
  * Path safety:
- *   - Any tool path resolved outside of cwd is rejected. The agent literally
- *     cannot ask the sandbox to read /etc/passwd on the host.
+ *   - Tool paths outside the mounted workspace are rejected. For bare repos,
+ *     the shared workspace includes every worktree beneath the bare repo root.
  *     EXCEPTION: pi clipboard temp files (basename "pi-clipboard-*") are read
  *     directly from the host. Additional paths can be allowed via
  *     --container-allow-paths or /sandbox allow.
@@ -33,13 +33,13 @@
  *        pi -e ./index.ts
  *      Optional flags:
  *        --container-size xs|sm|md|lg|xlg|xxlg (default: sm)
- *        --sandbox-name <name>                 (re-usable sandbox; reattaches if exists)
- *        --sandbox-persist                     (keep container after pi exits)
+ *        --sandbox-name <name>                 (override the default repo-scoped name)
+ *        --sandbox-persist                     (force persistence; already on by default)
  *        --sandbox-cache <volume>              (persistent cache volume at /cache)
  *        --container-image <name>            (default: pi-sandbox:latest)
  *        --container-net                     (allow outbound network)
  *        --browser                            (alias for --container-net)
- *        --container-keep                    (don't stop the container on exit)
+ *        --container-keep                    (keep even when project config opts out of persistence)
  *        --container-mount-skills            (mount ~/.agents/skills & ~/.pi/agent/skills read-only at /skills; default: on)
  *        --container-mount-paths <paths>     (comma-separated extra host dirs to mount at /skills/<basename>)
  *        --container-memory <limit>          (e.g., 10g, 512m)
@@ -52,10 +52,10 @@
  *   {
  *     "sandbox": {
  *       "size": "lg",
- *       "persist": true,
  *       "cacheVolume": "my-project-cache"
  *     }
  *   }
+ *   Persistent repo-scoped containers are the default; no project config is required.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -63,22 +63,21 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import {
-  isBareRepo,
-  detectBareRepoRoot,
-  listWorktrees,
-  type WorktreeInfo,
-} from '@kingsleyzissou/core';
+  isPathWithin,
+  listSandboxWorktrees,
+  resolveSandboxWorkspace,
+  sandboxPathForHostPath,
+  SANDBOX_WORKSPACE_ROOT,
+} from './worktrees.ts';
 import {
   type BashOperations,
   createBashTool,
@@ -166,88 +165,6 @@ function loadSandboxConfig(hostCwd: string): SandboxConfig | null {
 }
 
 // ---------------------------------------------------------------------------
-// Bare repo worktree detection & git path fixup
-// ---------------------------------------------------------------------------
-
-/** A worktree that is a sibling of the bare repo root (under hostCwd). */
-interface SiblingWorktree extends WorktreeInfo {
-  /** Relative path from hostCwd to the worktree directory. */
-  relPath: string;
-}
-
-/**
- * Find worktrees that live under hostCwd (siblings in a bare repo).
- * Uses core detection from @kingsleyzissou/core, then filters to
- * worktrees whose paths are children of hostCwd and computes relPath.
- */
-function findSiblingWorktrees(hostCwd: string): SiblingWorktree[] | null {
-  if (!isBareRepo(hostCwd)) return null;
-
-  const worktrees = listWorktrees(hostCwd);
-  const siblings: SiblingWorktree[] = [];
-
-  for (const wt of worktrees) {
-    if (!wt.path.startsWith(hostCwd + '/')) continue;
-    // Verify the .git pointer file exists in the worktree
-    if (!existsSync(resolvePath(wt.path, '.git'))) continue;
-    siblings.push({
-      ...wt,
-      relPath: wt.path.slice(hostCwd.length + 1),
-    });
-  }
-
-  return siblings.length > 0 ? siblings : null;
-}
-
-interface GitShadowMounts {
-  /** Temp directory holding the shadow files (cleaned up on exit) */
-  tmpDir: string;
-  /** Mount specs to shadow-mount over the original files */
-  mounts: MountSpec[];
-}
-
-/**
- * Create temporary files with corrected git paths for container use,
- * and return mount specs that shadow the originals inside the container.
- *
- * For each worktree:
- *   - <worktree>/.git       → "gitdir: /workspace/worktrees/<name>"
- *   - worktrees/<name>/gitdir → "/workspace/<relPath>/.git"
- *
- * The host files are never modified — Podman file-over-file bind mounts
- * shadow them inside the container.
- */
-function createGitShadowMounts(hostCwd: string, worktrees: SiblingWorktree[]): GitShadowMounts {
-  const hash = createHash('sha256').update(hostCwd).digest('hex').slice(0, 8);
-  const tmpDir = mkdtempSync(resolvePath(tmpdir(), `pi-sandbox-git-${hash}-`));
-  const mounts: MountSpec[] = [];
-
-  for (const wt of worktrees) {
-    // 1. Shadow the .git file in the worktree directory
-    //    Original: "gitdir: /absolute/host/path/worktrees/<name>"
-    //    Fixed:    "gitdir: /workspace/worktrees/<name>"
-    const dotGitShadow = resolvePath(tmpDir, `${wt.name}-dotgit`);
-    writeFileSync(dotGitShadow, `gitdir: ${REMOTE_ROOT}/worktrees/${wt.name}\n`);
-    mounts.push({
-      source: dotGitShadow,
-      target: `${REMOTE_ROOT}/${wt.relPath}/.git`,
-    });
-
-    // 2. Shadow the gitdir reverse-pointer in the worktree metadata
-    //    Original: "/absolute/host/path/<worktree>/.git"
-    //    Fixed:    "/workspace/<relPath>/.git"
-    const gitdirShadow = resolvePath(tmpDir, `${wt.name}-gitdir`);
-    writeFileSync(gitdirShadow, `${REMOTE_ROOT}/${wt.relPath}/.git\n`);
-    mounts.push({
-      source: gitdirShadow,
-      target: `${REMOTE_ROOT}/worktrees/${wt.name}/gitdir`,
-    });
-  }
-
-  return { tmpDir, mounts };
-}
-
-// ---------------------------------------------------------------------------
 // Runtime abstraction (Podman)
 // ---------------------------------------------------------------------------
 
@@ -280,7 +197,9 @@ interface MountSpec {
 interface RunArgs {
   name: string;
   image: string;
-  hostCwd: string;
+  workspaceRoot: string;
+  /** Mount the bare repo at its host-absolute path so Git worktree pointers resolve. */
+  mountHostPathAlias?: boolean;
   allowNetwork: boolean;
   /** Extra read-only bind mounts (e.g. skill directories). */
   extraMounts?: MountSpec[];
@@ -301,13 +220,12 @@ function randomSuffix(): string {
 }
 
 /**
- * Derive a deterministic container name from the project directory.
+ * Derive a deterministic container name from the shared workspace root.
  * Format: pi-sbx-<dirname>-<hash6>
- * This is unique per project and allows container reuse/recovery.
  */
-function deriveContainerName(hostCwd: string): string {
-  const basename = hostCwd.split('/').filter(Boolean).pop() || 'project';
-  const hash = createHash('sha256').update(hostCwd).digest('hex').slice(0, 6);
+function deriveContainerName(workspaceRoot: string): string {
+  const basename = workspaceRoot.split('/').filter(Boolean).pop() || 'project';
+  const hash = createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 6);
   return `pi-sbx-${basename}-${hash}`;
 }
 
@@ -429,7 +347,16 @@ function podmanRuntime(): Runtime {
       const r = await spawnWithTimeout(bin, ['volume', 'create', name], 10000);
       return r.code === 0 && !r.timedOut;
     },
-    run: async ({ name, image, hostCwd, allowNetwork, extraMounts, resources, cacheVolume }) => {
+    run: async ({
+      name,
+      image,
+      workspaceRoot,
+      mountHostPathAlias,
+      allowNetwork,
+      extraMounts,
+      resources,
+      cacheVolume,
+    }) => {
       const memory = resources?.memory ?? '2g';
       const cpus = resources?.cpus ?? '2';
       const pidsLimit = resources?.pidsLimit ?? 512;
@@ -454,10 +381,13 @@ function podmanRuntime(): Runtime {
         '--pids-limit',
         String(pidsLimit),
         '-v',
-        `${hostCwd}:/workspace`,
+        `${workspaceRoot}:/workspace`,
         '-w',
         '/workspace',
       ];
+      if (mountHostPathAlias && workspaceRoot !== '/workspace') {
+        args.push('-v', `${workspaceRoot}:${workspaceRoot}`);
+      }
       if (extraMounts) {
         for (const m of extraMounts) {
           args.push('-v', `${m.source}:${m.target}:ro`);
@@ -495,17 +425,20 @@ function podmanRuntime(): Runtime {
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox session: a single running container per pi session
+// Sandbox session: a persistent container per repository workspace
 // ---------------------------------------------------------------------------
 
 interface Sandbox {
   runtime: Runtime;
   name: string;
+  workspaceRoot: string;
   hostCwd: string;
+  remoteCwd: string;
+  isBareRepo: boolean;
   keep: boolean;
   /** Mounts applied when the container was created. */
   mounts: MountSpec[];
-  /** Host path prefixes allowed for read access from outside cwd. */
+  /** Host path prefixes allowed for read access from outside the workspace. */
   allowedExternalPrefixes: string[];
   /** Resource limits applied to the container. */
   resources?: RunArgs['resources'];
@@ -517,8 +450,6 @@ interface Sandbox {
   isReusable: boolean;
   /** Whether this sandbox was reattached (vs newly created). */
   isReattached: boolean;
-  /** Temp directory for git shadow mount files (cleaned up with container). */
-  gitShadowDir?: string;
 }
 
 let sandbox: Sandbox | null = null;
@@ -826,7 +757,7 @@ async function requestPathApproval(
 // Path translation + safety
 // ---------------------------------------------------------------------------
 
-const REMOTE_ROOT = '/workspace';
+const REMOTE_ROOT = SANDBOX_WORKSPACE_ROOT;
 const SKILLS_ROOT = '/skills';
 
 /** Return the container-side path if it falls under a known extra mount, otherwise null. */
@@ -839,24 +770,26 @@ function resolveExtraMountPath(containerPath: string, mounts: MountSpec[]): stri
   return null;
 }
 
-function toRemote(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
-  // If the path is already a container-absolute path (/workspace/...),
-  // accept it directly — the agent may be thinking in container space
-  // because the system prompt shows CWD as /workspace.
+function toRemote(hostPath: string, sbx: Sandbox): string {
+  // Accept container-absolute paths because the system prompt shows /workspace.
   if (hostPath === REMOTE_ROOT || hostPath.startsWith(`${REMOTE_ROOT}/`)) {
-    return hostPath;
+    const remotePath = resolvePath(hostPath);
+    if (isPathWithin(REMOTE_ROOT, remotePath)) return remotePath;
+    throw new Error(
+      `sandbox: refusing to access ${hostPath}: outside mounted workspace ${REMOTE_ROOT}`,
+    );
   }
-  // Also accept paths under any extra mount target (e.g. /skills/...)
-  if (mounts) {
-    const resolved = resolveExtraMountPath(hostPath, mounts);
-    if (resolved) return resolved;
+  // Also accept paths under any extra mount target (e.g. /skills/...).
+  const resolvedMount = resolveExtraMountPath(hostPath, sbx.mounts);
+  if (resolvedMount) return resolvedMount;
+
+  const abs = resolvePath(sbx.hostCwd, hostPath);
+  if (!isPathWithin(sbx.workspaceRoot, abs)) {
+    throw new Error(
+      `sandbox: refusing to access ${abs}: outside mounted workspace ${sbx.workspaceRoot}`,
+    );
   }
-  const abs = resolvePath(hostCwd, hostPath);
-  if (abs !== hostCwd && !abs.startsWith(`${hostCwd}/`)) {
-    throw new Error(`sandbox: refusing to access ${abs}: outside of project cwd ${hostCwd}`);
-  }
-  const rel = abs === hostCwd ? '' : abs.slice(hostCwd.length + 1);
-  return rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT;
+  return sandboxPathForHostPath(sbx.workspaceRoot, abs);
 }
 
 /**
@@ -889,17 +822,10 @@ function isAllowedExternalResource(hostPath: string, allowedPrefixes: string[]):
   return false;
 }
 
-/**
- * Check if a host path falls inside the project cwd.
- */
-function isInsideCwd(hostPath: string, hostCwd: string): boolean {
-  // Tool calls may use container-absolute paths because the agent sees
-  // the sandbox cwd as /workspace. Those paths are inside the project
-  // mount even though resolvePath(hostCwd, "/workspace/...") would
-  // otherwise look like an external host path and trigger approval.
+/** Check whether a tool path resolves inside the shared workspace mount. */
+function isInsideWorkspace(hostPath: string, hostCwd: string, workspaceRoot: string): boolean {
   if (hostPath === REMOTE_ROOT || hostPath.startsWith(`${REMOTE_ROOT}/`)) return true;
-  const abs = resolvePath(hostCwd, hostPath);
-  return abs === hostCwd || abs.startsWith(`${hostCwd}/`);
+  return isPathWithin(workspaceRoot, resolvePath(hostCwd, hostPath));
 }
 
 function shq(s: string): string {
@@ -1026,7 +952,7 @@ function execStream(
 function readOps(sbx: Sandbox): ReadOperations {
   const resolveAbs = (p: string) => resolvePath(sbx.hostCwd, p);
   const tryExternal = (p: string): { external: true; abs: string } | { external: false } => {
-    if (isInsideCwd(p, sbx.hostCwd)) return { external: false };
+    if (isInsideWorkspace(p, sbx.hostCwd, sbx.workspaceRoot)) return { external: false };
     const abs = resolveAbs(p);
     return isAllowedExternalResource(abs, sbx.allowedExternalPrefixes)
       ? { external: true, abs }
@@ -1037,7 +963,7 @@ function readOps(sbx: Sandbox): ReadOperations {
     readFile: p => {
       const ext = tryExternal(p);
       if (ext.external) return Promise.resolve(readFileSync(ext.abs));
-      return execCapture(sbx, `cat ${shq(toRemote(p, sbx.hostCwd, sbx.mounts))}`);
+      return execCapture(sbx, `cat ${shq(toRemote(p, sbx))}`);
     },
     access: p => {
       const ext = tryExternal(p);
@@ -1049,9 +975,7 @@ function readOps(sbx: Sandbox): ReadOperations {
           return Promise.reject(e);
         }
       }
-      return execCapture(sbx, `test -r ${shq(toRemote(p, sbx.hostCwd, sbx.mounts))}`).then(
-        () => {},
-      );
+      return execCapture(sbx, `test -r ${shq(toRemote(p, sbx))}`).then(() => {});
     },
     detectImageMimeType: async p => {
       const ext = tryExternal(p);
@@ -1067,10 +991,7 @@ function readOps(sbx: Sandbox): ReadOperations {
         return map[ext2lower] || null;
       }
       try {
-        const r = await execCapture(
-          sbx,
-          `file --mime-type -b ${shq(toRemote(p, sbx.hostCwd, sbx.mounts))}`,
-        );
+        const r = await execCapture(sbx, `file --mime-type -b ${shq(toRemote(p, sbx))}`);
         const m = r.toString().trim();
         return ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(m) ? m : null;
       } catch {
@@ -1081,11 +1002,16 @@ function readOps(sbx: Sandbox): ReadOperations {
 }
 
 /**
- * Check whether a host path is external to the sandbox cwd and needs approval.
- * Returns the absolute external path, or null if the path is inside cwd or a known mount.
+ * Check whether a host path is outside the mounted workspace and needs approval.
+ * Returns the absolute external path, or null if it is inside the workspace or a known mount.
  */
-function getExternalPath(hostPath: string, hostCwd: string, mounts: MountSpec[]): string | null {
-  if (isInsideCwd(hostPath, hostCwd)) return null;
+function getExternalPath(
+  hostPath: string,
+  hostCwd: string,
+  workspaceRoot: string,
+  mounts: MountSpec[],
+): string | null {
+  if (isInsideWorkspace(hostPath, hostCwd, workspaceRoot)) return null;
   const abs = resolvePath(hostCwd, hostPath);
   // Already covered by an extra mount (e.g. /skills)
   const containerPath = hostPath.startsWith('/') ? hostPath : abs;
@@ -1113,7 +1039,7 @@ async function ensureExternalReadApproved(
 function writeOps(sbx: Sandbox): WriteOperations {
   return {
     writeFile: async (p, content) => {
-      const remote = toRemote(p, sbx.hostCwd, sbx.mounts);
+      const remote = toRemote(p, sbx);
       if (isReadOnlyMount(remote, sbx.mounts)) {
         throw new Error(`sandbox: refusing to write to ${remote}: read-only skill mount`);
       }
@@ -1122,7 +1048,7 @@ function writeOps(sbx: Sandbox): WriteOperations {
       await execCapture(sbx, `printf %s ${shq(b64)} | base64 -d > ${shq(remote)}`);
     },
     mkdir: async dir => {
-      const remote = toRemote(dir, sbx.hostCwd, sbx.mounts);
+      const remote = toRemote(dir, sbx);
       if (isReadOnlyMount(remote, sbx.mounts)) {
         throw new Error(`sandbox: refusing to mkdir in ${remote}: read-only skill mount`);
       }
@@ -1138,7 +1064,7 @@ function editOps(sbx: Sandbox): EditOperations {
     readFile: r.readFile,
     access: r.access,
     writeFile: async (p, content) => {
-      const remote = toRemote(p, sbx.hostCwd, sbx.mounts);
+      const remote = toRemote(p, sbx);
       if (isReadOnlyMount(remote, sbx.mounts)) {
         throw new Error(`sandbox: refusing to edit ${remote}: read-only skill mount`);
       }
@@ -1149,10 +1075,7 @@ function editOps(sbx: Sandbox): EditOperations {
 
 function bashOps(sbx: Sandbox): BashOperations {
   return {
-    exec: (command, cwd, opts) => {
-      const remoteCwd = toRemote(cwd, sbx.hostCwd, sbx.mounts);
-      return execStream(sbx, `cd ${shq(remoteCwd)} && ${command}`, opts);
-    },
+    exec: (command, _cwd, opts) => execStream(sbx, `cd ${shq(sbx.remoteCwd)} && ${command}`, opts),
   };
 }
 
@@ -1234,12 +1157,11 @@ export default function (pi: ExtensionAPI) {
     default: 'sm',
   });
   pi.registerFlag('sandbox-name', {
-    description:
-      'Re-usable sandbox name. If container exists, reattaches; otherwise creates new. Random name if omitted.',
+    description: 'Override the default persistent repo-scoped sandbox name.',
     type: 'string',
   });
   pi.registerFlag('sandbox-persist', {
-    description: 'Keep sandbox container running after pi exits (for re-usable sandboxes)',
+    description: 'Force persistence when project config opts out (persistent by default)',
     type: 'boolean',
     default: false,
   });
@@ -1263,7 +1185,7 @@ export default function (pi: ExtensionAPI) {
     default: false,
   });
   pi.registerFlag('container-keep', {
-    description: "Don't stop the sandbox container when pi exits (for debugging)",
+    description: 'Keep the container after exit when persistence is disabled',
     type: 'boolean',
     default: false,
   });
@@ -1324,14 +1246,14 @@ export default function (pi: ExtensionAPI) {
     sbx: Sandbox,
     ctx: { ui: ExtensionUIContext; hasUI: boolean },
   ): Promise<void> {
-    const external = getExternalPath(paramsPath, sbx.hostCwd, sbx.mounts);
+    const external = getExternalPath(paramsPath, sbx.hostCwd, sbx.workspaceRoot, sbx.mounts);
     if (!external) return;
     // Already in session allowlist?
     if (isAllowedExternalResource(external, sbx.allowedExternalPrefixes)) return;
     // Need UI for interactive prompt
     if (!ctx.hasUI) {
       throw new Error(
-        `sandbox: refusing to access ${external}: outside of project cwd ${sbx.hostCwd}. ` +
+        `sandbox: refusing to access ${external}: outside mounted workspace ${sbx.workspaceRoot}. ` +
           `Use --container-allow-paths or /sandbox allow to grant access.`,
       );
     }
@@ -1344,7 +1266,7 @@ export default function (pi: ExtensionAPI) {
       const sbx = getSbx();
       if (!sbx) return localRead.execute(id, params, signal, onUpdate, ctx);
       await guardExternalRead(params.path, sbx, ctx);
-      const tool = createReadTool(localCwd, { operations: readOps(sbx) });
+      const tool = createReadTool(sbx.hostCwd, { operations: readOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -1353,7 +1275,7 @@ export default function (pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
       if (!sbx) return localWrite.execute(id, params, signal, onUpdate, ctx);
-      const tool = createWriteTool(localCwd, { operations: writeOps(sbx) });
+      const tool = createWriteTool(sbx.hostCwd, { operations: writeOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -1362,7 +1284,7 @@ export default function (pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
       if (!sbx) return localEdit.execute(id, params, signal, onUpdate, ctx);
-      const tool = createEditTool(localCwd, { operations: editOps(sbx) });
+      const tool = createEditTool(sbx.hostCwd, { operations: editOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -1372,7 +1294,7 @@ export default function (pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, ctx) {
       const sbx = getSbx();
       if (!sbx) return localBash.execute(id, params, signal, onUpdate, ctx);
-      const tool = createBashTool(localCwd, { operations: bashOps(sbx) });
+      const tool = createBashTool(sbx.hostCwd, { operations: bashOps(sbx) });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -1387,19 +1309,17 @@ export default function (pi: ExtensionAPI) {
     const sbx = getSbx();
     if (!sbx) return;
 
+    event.systemPromptOptions.cwd = sbx.remoteCwd;
     const skillInfo = sbx.mounts.length
       ? `Agent skills are mounted read-only at ${SKILLS_ROOT}/ (e.g. ${sbx.mounts.map(m => m.target).join(', ')}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
       : 'No skill directories are mounted.';
+    const cwdInfo = `Current working directory: ${sbx.remoteCwd} (sandboxed in ${sbx.runtime.kind} container ${sbx.name}, host cwd ${sbx.hostCwd} mounted read-write)`;
+    const promptHasCwd = /^Current working directory: .*$/m.test(event.systemPrompt);
+    const systemPrompt = promptHasCwd
+      ? event.systemPrompt.replace(/^Current working directory: .*$/m, cwdInfo)
+      : `${event.systemPrompt}\n${cwdInfo}`;
 
-    return {
-      systemPrompt: event.systemPrompt.replace(
-        `Current working directory: ${localCwd}`,
-        [
-          `Current working directory: ${REMOTE_ROOT} (sandboxed in ${sbx.runtime.kind} container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
-          skillInfo,
-        ].join('\n'),
-      ),
-    };
+    return { systemPrompt: `${systemPrompt}\n${skillInfo}` };
   });
 
   pi.on('session_start', async (_event, ctx) => {
@@ -1412,6 +1332,8 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify('Podman not available or timed out. Running without sandbox.', 'warning');
         return;
       }
+
+      const workspace = resolveSandboxWorkspace(localCwd);
 
       // Load sandbox config from .pi/config.json and .pi/agent/sandbox.json
       const config = loadSandboxConfig(localCwd);
@@ -1429,7 +1351,7 @@ export default function (pi: ExtensionAPI) {
       const allowNetwork =
         (pi.getFlag('container-net') as boolean) || (pi.getFlag('browser') as boolean);
       const keep = pi.getFlag('container-keep') as boolean;
-      const persist = (pi.getFlag('sandbox-persist') as boolean) || config?.persist || false;
+      const persist = (pi.getFlag('sandbox-persist') as boolean) || (config?.persist ?? true);
       const mountSkills = pi.getFlag('container-mount-skills') as boolean;
       const extraPathsRaw = pi.getFlag('container-mount-paths') as string | undefined;
       const extraPaths = extraPathsRaw
@@ -1439,12 +1361,10 @@ export default function (pi: ExtensionAPI) {
             .filter(Boolean)
         : undefined;
 
-      // Determine sandbox name:
-      //   --sandbox-name <name>  → use as-is (reusable)
-      //   default                → pi-sbx-<dirname>-<hash6> (deterministic, project-scoped)
+      // All worktrees in a bare repo share one persistent container.
       const nameFlag = pi.getFlag('sandbox-name') as string | undefined;
-      const sandboxName = nameFlag || deriveContainerName(localCwd);
-      const isReusable = !!nameFlag;
+      const sandboxName = nameFlag || deriveContainerName(workspace.root);
+      const isReusable = Boolean(nameFlag) || persist;
 
       // Determine cache volume
       const cacheFlag = pi.getFlag('sandbox-cache') as string | undefined;
@@ -1457,29 +1377,6 @@ export default function (pi: ExtensionAPI) {
 
       // Discover skill directories on the host.
       const skillMounts = mountSkills ? discoverSkillDirs(extraPaths) : [];
-
-      // Detect bare repo worktree structure and create git path fixups.
-      // When pi runs from a bare repo root, worktree .git files contain
-      // absolute host paths that don't resolve inside the container.
-      // We shadow-mount corrected files so git works transparently.
-      let gitShadowInfo: GitShadowMounts | null = null;
-      const siblingWorktrees = findSiblingWorktrees(localCwd);
-      if (siblingWorktrees) {
-        gitShadowInfo = createGitShadowMounts(localCwd, siblingWorktrees);
-      } else {
-        // Warn if running from a worktree — the bare repo isn't in the
-        // container mount, so git commands will likely fail.
-        const bareRoot = detectBareRepoRoot(localCwd);
-        if (bareRoot) {
-          ctx.ui.notify(
-            `⚠ Running sandbox from a worktree inside a bare repo.\n` +
-              `  Bare repo root: ${bareRoot}\n` +
-              `  Git commands inside the sandbox may not work correctly.\n` +
-              `  Consider running pi from the bare repo root instead.`,
-            'warning',
-          );
-        }
-      }
 
       // Check if a container with this name already exists:
       //   - Running  → reattach (crash recovery, persist mode, or concurrent session)
@@ -1500,7 +1397,7 @@ export default function (pi: ExtensionAPI) {
           );
           if (inspect.code === 0 && !inspect.timedOut) {
             // Container exists but is not running
-            if (isReusable || persist) {
+            if (isReusable) {
               // Reusable or persist mode → start the stopped container
               const started = await runtime.start(sandboxName);
               if (started) {
@@ -1563,19 +1460,16 @@ export default function (pi: ExtensionAPI) {
       if (pidsFlag !== undefined) resources.pidsLimit = pidsFlag;
       if (swapFlag !== undefined) resources.swap = swapFlag;
 
-      // Combine skill mounts with git shadow mounts (if any)
-      const gitMounts = gitShadowInfo?.mounts ?? [];
-      const allMounts = [...skillMounts, ...gitMounts];
-
       // Create new sandbox if not reattaching
       let actualName = sandboxName;
       if (!isReattached) {
         actualName = await runtime.run({
           name: sandboxName,
           image,
-          hostCwd: localCwd,
+          workspaceRoot: workspace.root,
+          mountHostPathAlias: workspace.isBareRepo,
           allowNetwork,
-          extraMounts: allMounts.length ? allMounts : undefined,
+          extraMounts: skillMounts.length ? skillMounts : undefined,
           resources,
           cacheVolume,
         });
@@ -1584,7 +1478,10 @@ export default function (pi: ExtensionAPI) {
       sandbox = {
         runtime,
         name: actualName,
+        workspaceRoot: workspace.root,
         hostCwd: localCwd,
+        remoteCwd: workspace.remoteCwd,
+        isBareRepo: workspace.isBareRepo,
         keep: keep || persist,
         mounts: skillMounts,
         allowedExternalPrefixes,
@@ -1593,12 +1490,9 @@ export default function (pi: ExtensionAPI) {
         projectConfig,
         isReusable,
         isReattached,
-        gitShadowDir: gitShadowInfo?.tmpDir,
       };
 
-      // Cleanup handler — stop & remove container unless keep/persist is set
-      // In default (non-reusable) mode, the container is fully removed.
-      // In reusable/persist mode, the container is kept for future sessions.
+      // Cleanup removes non-persistent containers; persistent containers stay running for reuse.
       const cleanup = () => {
         const s = sandbox;
         if (!s || s.keep) return;
@@ -1607,14 +1501,6 @@ export default function (pi: ExtensionAPI) {
           s.runtime.remove(s.name);
         } catch {
           /* ignore */
-        }
-        // Clean up git shadow mount temp files
-        if (s.gitShadowDir) {
-          try {
-            rmSync(s.gitShadowDir, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
         }
         sandbox = null;
       };
@@ -1651,7 +1537,11 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Smoke test (10s timeout)
-      const ok = (await execCapture(sandbox, 'id -un && pwd', 10000)).toString().trim();
+      const ok = (
+        await execCapture(sandbox, `id -un && cd ${shq(sandbox.remoteCwd)} && pwd`, 10000)
+      )
+        .toString()
+        .trim();
 
       // Build resource status string
       const resParts: string[] = [
@@ -1673,7 +1563,7 @@ export default function (pi: ExtensionAPI) {
         ),
       );
       ctx.ui.notify(
-        `${statusPrefix}: podman ${actualName}${resStr}${isReusable ? ' [re-usable]' : ''}\n${ok}${skillMounts.length ? `\nSkills mounted: ${skillMounts.map(m => m.target).join(', ')}` : ''}${cacheVolume ? `\nCache volume: ${cacheVolume} at /cache` : ''}`,
+        `${statusPrefix}: podman ${actualName}${resStr}${sandbox.keep ? ' [persistent]' : ''}\n${ok}${skillMounts.length ? `\nSkills mounted: ${skillMounts.map(m => m.target).join(', ')}` : ''}${cacheVolume ? `\nCache volume: ${cacheVolume} at /cache` : ''}`,
         'info',
       );
 
@@ -1754,14 +1644,13 @@ export default function (pi: ExtensionAPI) {
     if (sbx.resources?.pidsLimit !== undefined)
       resParts.push(`pids-limit: ${sbx.resources.pidsLimit}`);
     const resStr = resParts.length ? `\nresources: ${resParts.join(', ')}` : '';
-    const reusableStr = sbx.isReusable
-      ? ` [re-usable${sbx.isReattached ? ', reattached' : ''}]`
-      : '';
+    const reusableStr = sbx.keep ? ` [persistent${sbx.isReattached ? ', reattached' : ''}]` : '';
     const cfg = sbx.projectConfig;
     ctx.ui.notify(
       [
         `Sandbox: ${sbx.runtime.kind} container ${sbx.name}${reusableStr}`,
-        `host cwd: ${sbx.hostCwd}`,
+        `workspace root: ${sbx.workspaceRoot}`,
+        `active cwd: ${sbx.hostCwd} (${sbx.remoteCwd})`,
         `image: ${sbx.imageRef} (${cfg.pinned ? 'pinned' : 'unpinned'})`,
         `local digest: ${localDigest ?? 'unknown'}`,
         `last seen remote digest: ${cfg.lastDigest ?? 'unknown'}`,
@@ -1774,6 +1663,47 @@ export default function (pi: ExtensionAPI) {
         .join('\n'),
       'info',
     );
+  }
+
+  async function cmdSandboxWorktree(raw: string, ctx: { ui: ExtensionUIContext }) {
+    const sbx = getSbx();
+    if (!sbx) {
+      ctx.ui.notify('Sandbox is not active.', 'info');
+      return;
+    }
+    if (!sbx.isBareRepo) {
+      ctx.ui.notify('Worktree switching is available for bare-repo workspaces only.', 'warning');
+      return;
+    }
+
+    const worktrees = listSandboxWorktrees(sbx.workspaceRoot);
+    const current = worktrees.find(worktree => isPathWithin(worktree.path, sbx.hostCwd));
+    if (!raw.trim()) {
+      if (worktrees.length === 0) {
+        ctx.ui.notify('No Git worktrees found in this repository.', 'info');
+        return;
+      }
+      const lines = worktrees.map(worktree => {
+        const active = worktree.name === current?.name ? '*' : ' ';
+        const branch = worktree.branch ?? 'detached';
+        return `${active} ${worktree.name} (${branch}) — ${sandboxPathForHostPath(sbx.workspaceRoot, worktree.path)}`;
+      });
+      ctx.ui.notify(`Worktrees (* = active):\n${lines.join('\n')}`, 'info');
+      return;
+    }
+
+    const selected = worktrees.find(worktree => worktree.name === raw.trim());
+    if (!selected) {
+      ctx.ui.notify(
+        `Unknown worktree: ${raw.trim()}\nAvailable: ${worktrees.map(worktree => worktree.name).join(', ') || '(none)'}`,
+        'warning',
+      );
+      return;
+    }
+
+    sbx.hostCwd = selected.path;
+    sbx.remoteCwd = sandboxPathForHostPath(sbx.workspaceRoot, selected.path);
+    ctx.ui.notify(`Active worktree: ${selected.name} (${sbx.remoteCwd})`, 'info');
   }
 
   async function cmdSandboxAllow(raw: string, ctx: { ui: ExtensionUIContext }) {
@@ -1991,6 +1921,7 @@ export default function (pi: ExtensionAPI) {
       `  /sandbox status        Show container status`,
       `  /sandbox allow <path>  Grant session read access to a host path`,
       `  /sandbox paths [revoke <path>]  List/revoke path approvals`,
+      `  /sandbox worktree [name]  List or switch active Git worktree`,
       `  /sandbox doctor       Check core tools inside the container`,
       `  /sandbox install      Pull sandbox image (no running container needed)`,
       `  /sandbox update       Pull the latest image (requires active sandbox)`,
@@ -2046,7 +1977,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand('sandbox', {
     description:
-      'Sandbox management. Subcommands: status, doctor, allow, paths, install, update, config, pin, unpin',
+      'Sandbox management. Subcommands: status, worktree, doctor, allow, paths, install, update, config, pin, unpin',
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/);
       const sub = parts[0]?.toLowerCase() || 'status';
@@ -2055,6 +1986,9 @@ export default function (pi: ExtensionAPI) {
         case 'status':
         case 'info':
           return cmdSandboxStatus(parts.slice(1).join(' '), ctx);
+        case 'worktree':
+        case 'worktrees':
+          return cmdSandboxWorktree(parts.slice(1).join(' '), ctx);
         case 'doctor':
         case 'check':
           return cmdSandboxDoctor(parts.slice(1).join(' '), ctx);
@@ -2082,7 +2016,7 @@ export default function (pi: ExtensionAPI) {
         default:
           ctx.ui.notify(
             `Unknown subcommand: ${sub}\n` +
-              `Available: status, doctor, allow, paths [revoke], install, update, config, pin, unpin`,
+              `Available: status, worktree [name], doctor, allow, paths [revoke], install, update, config, pin, unpin`,
             'info',
           );
       }

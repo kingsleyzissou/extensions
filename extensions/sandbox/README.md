@@ -2,11 +2,12 @@
 
 Personal pi extension that runs `read`, `write`, `edit`, `bash`, and `user_bash` inside a Podman sandbox.
 
-- Host project cwd is mounted read-write at `/workspace`
+- One persistent container per bare repo by default; the bare root and all child worktrees are mounted read-write at `/workspace` (the bare root is also mounted at its host path so Git worktree pointers resolve)
+- Each Pi session starts in its active worktree; `/sandbox worktree [name]` lists or switches worktrees without restarting the container
+- Non-bare projects get a persistent container keyed by their working directory
 - Agent runs as non-root `pi` user
 - No host `$HOME`, SSH keys, cloud creds, browser state, or container socket
 - Resource limits via size tiers
-- Optional reusable named containers
 - One command namespace: `/sandbox ...`
 
 ## Quick start
@@ -25,6 +26,7 @@ All UI commands live under `/sandbox`:
 ```text
 /sandbox                 Show status
 /sandbox status          Show status, image, digest/update info
+/sandbox worktree        List worktrees; add a name to switch active worktree
 /sandbox doctor          Verify core tools in the running container
 /sandbox update          Pull configured sandbox image; restart pi to use it
 /sandbox config          Show .pi/agent/sandbox.json
@@ -73,22 +75,23 @@ Use:
 /sandbox unpin
 ```
 
-After `/sandbox update`, restart pi. Existing containers keep using the old image.
+After `/sandbox update`, an existing persistent container continues using its original image. To use the new image, run `podman rm -f <container-name>` with the name shown by `/sandbox status`, then start Pi again.
 
 ## Flags
 
-| Flag                                                                                   | Purpose                                        |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `--no-container`, `--noc`                                                              | Disable sandbox                                |
-| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg`                                           | Resource tier (`sm` default)                   |
-| `--sandbox-name <name>`                                                                | Reattach/reuse named container                 |
-| `--sandbox-persist`                                                                    | Keep reusable container running after pi exits |
-| `--sandbox-cache <volume>`                                                             | Mount volume at `/cache`                       |
-| `--container-image <ref>`                                                              | Override image ref                             |
-| `--no-container-net`                                                                   | Disable container networking                   |
-| `--container-keep`                                                                     | Keep one-off container after exit              |
-| `--container-allow-paths <paths>`                                                      | Comma-separated session read allowlist         |
-| `--container-memory`, `--container-cpus`, `--container-swap`, `--container-pids-limit` | Override tier resources                        |
+| Flag                                          | Purpose                                              |
+| --------------------------------------------- | ---------------------------------------------------- |
+| `--no-container`, `--noc`                     | Disable sandbox                                      |
+| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg`  | Resource tier (`sm` default)                         |
+| `--sandbox-name <name>`                       | Override repo-scoped container name                  |
+| `--sandbox-persist`                           | Force persistence if config opts out (on by default) |
+| `--sandbox-cache <volume>`                    | Mount volume at `/cache`                             |
+| `--container-image <ref>`                     | Override image ref                                   |
+| `--no-container-net`                          | Disable container networking                         |
+| `--container-keep`                            | Keep non-persistent container running after exit     |
+| `--container-allow-paths <paths>`             | Session read-path allowlist                          |
+| `--container-memory` / `--container-cpus`     | Override tier memory/CPU                             |
+| `--container-swap` / `--container-pids-limit` | Override tier swap/PID limit                         |
 
 ## Image contents
 

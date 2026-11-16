@@ -1,7 +1,7 @@
 {
   "name": "@kingsleyzissou/sandbox",
   "version": "0.1.0",
-  "description": "pi extension that runs every read/write/edit/bash op inside a per-session Linux container (Podman)",
+  "description": "pi extension that runs tool operations inside persistent per-repository Podman containers",
   "module": "index.ts",
   "type": "module",
   "keywords": [
@@ -14,6 +14,7 @@
   ],
   "files": [
     "index.ts",
+    "worktrees.ts",
     "containers/"
   ],
   "scripts": {
