@@ -4,10 +4,13 @@ A mono-repo of [pi](https://pi.dev) extensions.
 
 ## Extensions
 
-| Extension                                        | Description                                                                            |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| [`@kingsleyzissou/quorum`](extensions/quorum/)   | Ensemble PR review — spawns specialized reviewers in parallel and synthesizes feedback |
-| [`@kingsleyzissou/sandbox`](extensions/sandbox/) | Container sandbox — isolates agent tool operations inside Podman containers            |
+| Extension                                        | Description                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| [`@kingsleyzissou/sandbox`](extensions/sandbox/) | Container sandbox — isolates agent tool operations inside Podman containers |
+
+## Code review
+
+Use OpenCodeReview's `ocr` command (`ocr review`) for code reviews.
 
 ## Development
 

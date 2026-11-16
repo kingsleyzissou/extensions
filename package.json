@@ -27,7 +27,6 @@
   },
   "pi": {
     "extensions": [
-      "extensions/quorum/index.ts",
       "extensions/sandbox/index.ts"
     ]
   },
