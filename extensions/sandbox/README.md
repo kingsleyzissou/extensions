@@ -82,7 +82,7 @@ After `/sandbox update`, an existing persistent container continues using its or
 | Flag                                          | Purpose                                              |
 | --------------------------------------------- | ---------------------------------------------------- |
 | `--no-container`, `--noc`                     | Disable sandbox                                      |
-| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg`  | Resource tier (`sm` default)                         |
+| `--container-size xs\|sm\|md\|lg\|xlg\|xxlg`  | Resource tier (`md` default)                         |
 | `--sandbox-name <name>`                       | Override repo-scoped container name                  |
 | `--sandbox-persist`                           | Force persistence if config opts out (on by default) |
 | `--sandbox-cache <volume>`                    | Mount volume at `/cache`                             |

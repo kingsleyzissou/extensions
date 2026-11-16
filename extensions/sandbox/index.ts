@@ -32,7 +32,7 @@
  *   Then run pi with the extension (sandbox is ON by default):
  *        pi -e ./index.ts
  *      Optional flags:
- *        --container-size xs|sm|md|lg|xlg|xxlg (default: sm)
+ *        --container-size xs|sm|md|lg|xlg|xxlg (default: md)
  *        --sandbox-name <name>                 (override the default repo-scoped name)
  *        --sandbox-persist                     (force persistence; already on by default)
  *        --sandbox-cache <volume>              (persistent cache volume at /cache)
@@ -1152,9 +1152,9 @@ export default function (pi: ExtensionAPI) {
   });
   pi.registerFlag('container-size', {
     description:
-      'Sandbox size tier: xs, sm (default), md, lg, xlg, xxlg. Sets memory, swap, cpu, disk limits.',
+      'Sandbox size tier: xs, sm, md (default), lg, xlg, xxlg. Sets memory, swap, cpu, disk limits.',
     type: 'string',
-    default: 'sm',
+    default: 'md',
   });
   pi.registerFlag('sandbox-name', {
     description: 'Override the default persistent repo-scoped sandbox name.',
@@ -1341,7 +1341,7 @@ export default function (pi: ExtensionAPI) {
 
       // Determine size tier (flag > config > default)
       const sizeFlag = pi.getFlag('container-size') as string | undefined;
-      const sizeTier = parseSizeTier(sizeFlag || config?.size || 'sm') || 'sm';
+      const sizeTier = parseSizeTier(sizeFlag || config?.size || 'md') || 'md';
       const tierSpec = TIER_SPECS[sizeTier];
 
       // Resolve image: flag > .pi/agent/sandbox.json > default
