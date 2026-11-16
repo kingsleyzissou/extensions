@@ -1555,12 +1555,16 @@ export default function (pi: ExtensionAPI) {
       const resStr = ` (${resParts.join(', ')})`;
 
       const statusPrefix = isReattached ? '✓ Reattached' : '󰞀 Sandbox up';
-      ctx.ui.setStatus(
-        'sandbox',
-        ctx.ui.theme.fg(
-          'accent',
-          `${statusPrefix}: ${actualName} (net=${allowNetwork ? 'on' : 'off'})${resStr}`,
-        ),
+      ctx.ui.setStatus('sandbox', undefined);
+      ctx.ui.setWidget(
+        'sandbox-status',
+        [
+          ctx.ui.theme.fg(
+            'accent',
+            `${statusPrefix}: ${actualName} (net=${allowNetwork ? 'on' : 'off'})${resStr}`,
+          ),
+        ],
+        { placement: 'belowEditor' },
       );
       ctx.ui.notify(
         `${statusPrefix}: podman ${actualName}${resStr}${sandbox.keep ? ' [persistent]' : ''}\n${ok}${skillMounts.length ? `\nSkills mounted: ${skillMounts.map(m => m.target).join(', ')}` : ''}${cacheVolume ? `\nCache volume: ${cacheVolume} at /cache` : ''}`,
