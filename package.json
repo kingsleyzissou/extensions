@@ -4,7 +4,6 @@
   "type": "module",
   "workspaces": [
     "libs/*",
-    "apps/*",
     "extensions/*"
   ],
   "scripts": {
@@ -28,12 +27,8 @@
   },
   "pi": {
     "extensions": [
-      "extensions/pacifista/index.ts",
       "extensions/quorum/index.ts",
       "extensions/sandbox/index.ts"
-    ],
-    "skills": [
-      "extensions/pacifista/skills"
     ]
   },
   "peerDependencies": {
