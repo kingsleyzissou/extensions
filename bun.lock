@@ -17,13 +17,6 @@
         "typescript": "5.9.3",
       },
     },
-    "extensions/quorum": {
-      "name": "@kingsleyzissou/quorum",
-      "version": "0.1.0",
-      "peerDependencies": {
-        "@earendil-works/pi-coding-agent": "0.84.3",
-      },
-    },
     "extensions/sandbox": {
       "name": "@kingsleyzissou/sandbox",
       "version": "0.1.0",
@@ -139,8 +132,6 @@
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
     "@kingsleyzissou/core": ["@kingsleyzissou/core@workspace:libs/core"],
-
-    "@kingsleyzissou/quorum": ["@kingsleyzissou/quorum@workspace:extensions/quorum"],
 
     "@kingsleyzissou/sandbox": ["@kingsleyzissou/sandbox@workspace:extensions/sandbox"],
 
