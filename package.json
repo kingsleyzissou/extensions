@@ -33,8 +33,7 @@
       "extensions/sandbox/index.ts"
     ],
     "skills": [
-      "extensions/pacifista/skills",
-      "extensions/quorum/skills"
+      "extensions/pacifista/skills"
     ]
   },
   "peerDependencies": {
