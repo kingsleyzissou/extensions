@@ -10,8 +10,10 @@
  *   - The agent's bash and file tools run in the project workspace mounted at
  *     /workspace. Bare-repo worktrees share that mount and persistent container.
  *   - The agent runs as a non-root user (uid 1000) inside the container.
- *   - No host secrets are mounted (no $HOME, ~/.ssh, ~/.aws, ~/.config, no
- *     SSH agent, no container socket).
+ *   - No host secrets are mounted (no $HOME, ~/.ssh, ~/.aws, ~/.config, or
+ *     container socket). If SSH_AUTH_SOCK is set, the host agent is forwarded
+ *     for Git-over-SSH; sandboxed code can use it to authenticate, but private
+ *     keys are not copied into the container.
  *   - Network is enabled by default; the security proxy gates outbound traffic.
  *     Podman uses --network none when disabled; Apple's --internal network is
  *     host-only without NAT, not fully disconnected.

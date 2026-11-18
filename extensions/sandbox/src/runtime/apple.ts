@@ -25,6 +25,7 @@ export function buildContainerRunArgs(
     environment: value => ['--env', value],
     workdir: path => ['--workdir', path],
   });
+  if (process.env.SSH_AUTH_SOCK) args.push('--ssh');
   if (internalNetwork) args.push('--network', internalNetwork);
   args.push(run.image, 'sleep', 'infinity');
   return args;

@@ -14,6 +14,8 @@ Both runtimes run the same Linux sandbox image; Apple Containers runs it in a li
 - Non-bare projects get a persistent container keyed by their working directory.
 - The agent runs as the non-root `pi` user, with all Linux capabilities dropped.
 - No host `$HOME`, SSH keys, cloud credentials, browser state, or container socket are mounted.
+- When `SSH_AUTH_SOCK` is set, the host SSH agent is forwarded for Git-over-SSH. Sandboxed code can use the agent to authenticate, but private keys are not copied into the container.
+- Podman binds the available SSH socket when creating the persistent container; recreate the container if that socket path changes.
 - Size tiers enforce CPU and memory limits on both runtimes; Podman also enforces PID, swap, and disk limits.
 
 Apple Containers does not expose controls equivalent to `no-new-privileges`, PID limits, swap limits, or disk limits. With `--no-container-net`, Podman uses a fully disconnected network; Apple Containers uses a host-only network without NAT, which is not fully disconnected.
@@ -111,7 +113,7 @@ After `/sandbox update`, an existing persistent container continues using its or
 
 Fedora 44 minimal (`registry.fedoraproject.org/fedora-minimal:44`) with common agent tools:
 
-- shell/core: `bash`, coreutils, `git`, `curl`, `jq`, `ripgrep`, `fd`, `bat`, `eza`, `yq`, `ast-grep`
+- shell/core: `bash`, coreutils, `git`, `openssh-clients`, `curl`, `jq`, `ripgrep`, `fd`, `bat`, `eza`, `yq`, `ast-grep`
 - runtimes: `bun`, `node`, `npm`, `uv`, Python 3.13
 - browser: `chromium`
 
