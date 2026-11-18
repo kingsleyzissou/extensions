@@ -13,6 +13,16 @@ export function buildPodmanRunArgs(
     environment: value => ['-e', value],
     workdir: path => ['-w', path],
   });
+  const sshAuthSock = process.env.SSH_AUTH_SOCK;
+  if (sshAuthSock) {
+    args.push(
+      '--userns=keep-id:uid=1000,gid=1000',
+      '--mount',
+      `type=bind,src=${sshAuthSock},target=/run/ssh-agent.sock`,
+      '-e',
+      'SSH_AUTH_SOCK=/run/ssh-agent.sock',
+    );
+  }
   args.push(
     '--security-opt',
     'no-new-privileges',

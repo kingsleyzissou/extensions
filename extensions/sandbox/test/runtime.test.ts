@@ -56,6 +56,15 @@ describe('Podman runtime helpers', () => {
       '/tmp:/memory:rw',
       '-v',
       'cache:/cache',
+      ...(process.env.SSH_AUTH_SOCK
+        ? [
+            '--userns=keep-id:uid=1000,gid=1000',
+            '--mount',
+            `type=bind,src=${process.env.SSH_AUTH_SOCK},target=/run/ssh-agent.sock`,
+            '-e',
+            'SSH_AUTH_SOCK=/run/ssh-agent.sock',
+          ]
+        : []),
       '--security-opt',
       'no-new-privileges',
       '--pids-limit',
@@ -71,6 +80,33 @@ describe('Podman runtime helpers', () => {
       'infinity',
     ]);
   });
+});
+
+test('forwards an available SSH agent without requiring it', () => {
+  const sshAuthSock = process.env.SSH_AUTH_SOCK;
+  const run = {
+    name: 'pi-sbx-test',
+    image: 'pi-sandbox:latest',
+    workspaceRoot: '/repo',
+    allowNetwork: true,
+  };
+
+  try {
+    delete process.env.SSH_AUTH_SOCK;
+    expect(buildContainerRunArgs(run)).not.toContain('--ssh');
+    expect(buildPodmanRunArgs(run, '')).not.toContain('SSH_AUTH_SOCK=/run/ssh-agent.sock');
+
+    process.env.SSH_AUTH_SOCK = '/tmp/ssh-agent.sock';
+    expect(buildContainerRunArgs(run)).toContain('--ssh');
+    expect(buildPodmanRunArgs(run, '')).toContain('--userns=keep-id:uid=1000,gid=1000');
+    expect(buildPodmanRunArgs(run, '')).toContain(
+      'type=bind,src=/tmp/ssh-agent.sock,target=/run/ssh-agent.sock',
+    );
+    expect(buildPodmanRunArgs(run, '')).toContain('SSH_AUTH_SOCK=/run/ssh-agent.sock');
+  } finally {
+    if (sshAuthSock === undefined) delete process.env.SSH_AUTH_SOCK;
+    else process.env.SSH_AUTH_SOCK = sshAuthSock;
+  }
 });
 
 describe('Apple Container runtime helpers', () => {
@@ -117,6 +153,7 @@ describe('Apple Container runtime helpers', () => {
       'type=bind,source=/tmp,target=/memory',
       '--mount',
       'type=volume,source=cache,target=/cache',
+      ...(process.env.SSH_AUTH_SOCK ? ['--ssh'] : []),
       '--network',
       'pi-sandbox-internal-test',
       'pi-sandbox:latest',
