@@ -79,7 +79,7 @@ import {
 } from './config';
 import { PathApprovalStore } from './path-approvals';
 import { registerSandboxCommands } from './commands';
-import type { Sandbox } from './sandbox';
+import type { RunArgs, Sandbox } from './types';
 import {
   bashOps,
   discoverSkillDirs,
@@ -101,7 +101,6 @@ import {
   parseSizeTier,
   spawnWithTimeout,
   TIER_SPECS,
-  type RunArgs,
 } from './runtime';
 
 let sandbox: Sandbox | null = null;

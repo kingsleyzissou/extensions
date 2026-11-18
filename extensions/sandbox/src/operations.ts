@@ -11,8 +11,7 @@ import type {
   WriteOperations,
 } from '@earendil-works/pi-coding-agent';
 import { requestPathApproval, type PathApprovalStore } from './path-approvals';
-import type { Sandbox } from './sandbox';
-import type { MountSpec } from './runtime';
+import type { MountSpec, Sandbox } from './types';
 
 // Path translation + safety
 // ---------------------------------------------------------------------------
