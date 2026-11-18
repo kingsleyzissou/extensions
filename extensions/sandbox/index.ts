@@ -70,7 +70,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve as resolvePath } from 'node:path';
+import { dirname, resolve as resolvePath } from 'node:path';
 import {
   isPathWithin,
   listSandboxWorktrees,
@@ -392,6 +392,15 @@ function podmanRuntime(): Runtime {
         for (const m of extraMounts) {
           args.push('-v', `${m.source}:${m.target}:ro`);
         }
+      }
+      const memoryFilePath = process.env.MEMORY_FILE_PATH;
+      if (memoryFilePath) {
+        args.push(
+          '-e',
+          'MEMORY_FILE_PATH=/memory/memory.jsonl',
+          '-v',
+          `${dirname(memoryFilePath)}:/memory:rw`,
+        );
       }
       // Mount cache volume if provided
       if (cacheVolume) {
