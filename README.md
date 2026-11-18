@@ -4,9 +4,9 @@ A mono-repo of [pi](https://pi.dev) extensions.
 
 ## Extensions
 
-| Extension                                        | Description                                                                 |
-| ------------------------------------------------ | --------------------------------------------------------------------------- |
-| [`@kingsleyzissou/sandbox`](extensions/sandbox/) | Container sandbox — isolates agent tool operations inside Podman containers |
+| Extension                                        | Description                                                    |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| [`@kingsleyzissou/sandbox`](extensions/sandbox/) | Container sandbox — Apple Containers on macOS, Podman on Linux |
 
 ## Code review
 

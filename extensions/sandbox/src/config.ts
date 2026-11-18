@@ -80,19 +80,7 @@ export async function inspectLocalImageDigest(
   runtime: Runtime,
   imageRef: string,
 ): Promise<string | null> {
-  const result = await spawnWithTimeout(
-    runtime.bin,
-    ['image', 'inspect', imageRef, '--format', '{{json .RepoDigests}}'],
-    10000,
-  );
-  if (result.code !== 0 || result.timedOut) return null;
-  try {
-    const digests = JSON.parse(result.stdout.trim()) as string[];
-    const digest = digests.find(d => d.includes('@sha256:')) ?? null;
-    return digest?.split('@', 2)[1] ?? null;
-  } catch {
-    return null;
-  }
+  return runtime.imageDigest(imageRef);
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +96,7 @@ export interface TagInfo {
 /**
  * Fetch tag info from Docker Hub v2 API for a public repository.
  * Returns null on network error or if the image repo isn't on Docker Hub.
- * Podman pulls from docker.io by default for short-name images.
+ * Both configured runtimes resolve the default short-name image through Docker Hub.
  */
 export async function fetchTagDigest(image: string, tag: string): Promise<TagInfo | null> {
   try {

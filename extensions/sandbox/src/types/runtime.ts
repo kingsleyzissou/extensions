@@ -1,19 +1,18 @@
-export type RuntimeKind = 'podman';
+export type RuntimeKind = 'apple' | 'podman';
 
 export interface Runtime {
   kind: RuntimeKind;
+  /** Runtime executable, used for container exec. */
   bin: string;
-  /** Returns the container name actually used (may differ from args.name on collision). */
   run(args: RunArgs): Promise<string>;
   stop(name: string): void;
-  /** Remove a container forcefully (podman rm -f). */
   remove(name: string): void;
-  exists(image: string): Promise<boolean>;
-  /** Check if a container with the given name is running. */
-  isRunning(name: string): Promise<boolean>;
-  /** Start an existing stopped container. */
+  containerState(name: string): Promise<string | null>;
+  imageExists(image: string): Promise<boolean>;
+  imageDigest(image: string): Promise<string | null>;
+  pullImage(image: string, timeoutMs: number): Promise<boolean>;
+  smokeTest(name: string, image: string, timeoutMs: number): Promise<string | null>;
   start(name: string): Promise<boolean>;
-  /** Create a volume if it doesn't exist. */
   createVolume(name: string): Promise<boolean>;
 }
 
@@ -33,13 +32,13 @@ export interface RunArgs {
   allowNetwork: boolean;
   /** Extra read-only bind mounts (e.g. skill directories). */
   extraMounts?: MountSpec[];
-  /** Resource limits (undefined = use runtime default). */
+  /** Resource limits; Apple Containers only applies memory and CPU. */
   resources?: {
-    memory?: string; // e.g., "2g", "512m", "10gb"
-    cpus?: string; // e.g., "2", "0.5", "4.0"
-    pidsLimit?: number; // e.g., 512
-    swap?: string; // e.g., "1g", "0" to disable
-    disk?: string; // disk/storage limit (e.g., "10g", "20gb")
+    memory?: string;
+    cpus?: string;
+    pidsLimit?: number;
+    swap?: string;
+    disk?: string;
   };
   /** Optional volume to mount at /cache for persistent caching. */
   cacheVolume?: string;

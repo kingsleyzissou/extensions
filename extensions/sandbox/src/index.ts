@@ -3,10 +3,8 @@
  * --------------------
  * Forked from https://github.com/TheGreatAxios/pi-extensions/tree/main/pi-container-sandbox
  * Original author: Sawyer Cutler (https://github.com/TheGreatAxios)
- * Adapted to use Podman instead of Docker.
- *
- * Run every read/write/edit/bash operation pi performs inside a persistent,
- * repository-scoped Linux container (Podman).
+ * Uses Apple Containers on macOS and Podman on Linux to run every
+ * read/write/edit/bash operation in a persistent Linux container.
  *
  * Threat model:
  *   - The agent's bash and file tools run in the project workspace mounted at
@@ -15,10 +13,10 @@
  *   - No host secrets are mounted (no $HOME, ~/.ssh, ~/.aws, ~/.config, no
  *     SSH agent, no container socket).
  *   - Network is enabled by default; the security proxy gates outbound traffic.
- *     Disable with --no-container-net.
- *     Podman uses --network none (when disabled).
- *   - Resource caps via size tiers (xs, sm, md, lg, xlg, xxlg) limit blast radius.
- *     Override with --container-size or individual --container-memory, --container-cpus, etc.
+ *     Podman uses --network none when disabled; Apple's --internal network is
+ *     host-only without NAT, not fully disconnected.
+ *   - Podman applies CPU, memory, PID, swap, and disk limits. Apple Containers
+ *     only applies CPU and memory limits.
  *
  * Path safety:
  *   - Tool paths outside the mounted workspace are rejected. For bare repos,
@@ -28,7 +26,7 @@
  *     --container-allow-paths or /sandbox allow.
  *
  * Usage:
- *   Podman: image is pulled automatically from the registry on first run.
+ *   Apple Containers (macOS) or Podman (Linux): images are pulled automatically on first run.
  *   Then run pi with the extension (sandbox is ON by default):
  *        pi -e ./index.ts
  *      Optional flags:
@@ -44,8 +42,8 @@
  *        --container-mount-paths <paths>     (comma-separated extra host dirs to mount at /skills/<basename>)
  *        --container-memory <limit>          (e.g., 10g, 512m)
  *        --container-cpus <count>            (e.g., 4, 0.5)
- *        --container-pids-limit <n>          (max processes; default: 512)
- *        --container-swap <limit>            (swap limit, e.g., 1g)
+ *        --container-pids-limit <n>           (Podman only; default: 512)
+ *        --container-swap <limit>             (Podman only; e.g. 1g)
  *        --no-container, --noc               (bypass entirely)
  *
  * Config file (.pi/config.json):
@@ -99,7 +97,6 @@ import {
   detectRuntime,
   loadSandboxConfig,
   parseSizeTier,
-  spawnWithTimeout,
   TIER_SPECS,
 } from './runtime';
 
@@ -109,7 +106,8 @@ const getSbx = () => sandbox;
 
 export function registerExtension(pi: ExtensionAPI) {
   pi.registerFlag('container', {
-    description: 'Sandbox all bash/read/write/edit ops inside a Linux container (default: on)',
+    description:
+      'Sandbox bash/read/write/edit ops in Apple Containers on macOS or Podman on Linux (default: on)',
     type: 'boolean',
     default: true,
   });
@@ -125,7 +123,7 @@ export function registerExtension(pi: ExtensionAPI) {
   });
   pi.registerFlag('container-size', {
     description:
-      'Sandbox size tier: xs, sm, md (default), lg, xlg, xxlg. Sets memory, swap, cpu, disk limits.',
+      'Sandbox size tier: xs, sm, md (default), lg, xlg, xxlg. Apple applies memory/CPU; Podman also applies swap/disk/PID limits.',
     type: 'string',
     default: 'md',
   });
@@ -187,14 +185,13 @@ export function registerExtension(pi: ExtensionAPI) {
     type: 'string',
   });
   pi.registerFlag('container-pids-limit', {
-    description: 'Maximum number of PIDs the container can create. Default: 512',
+    description: 'Maximum number of PIDs on Podman (default: 512; unsupported by Apple Containers)',
     type: 'string',
   });
   pi.registerFlag('container-swap', {
-    description: 'Swap limit for the container (e.g., 1g, 0 to disable). Default: unset',
+    description: 'Podman swap limit (e.g., 1g, 0 to disable; unsupported by Apple Containers)',
     type: 'string',
   });
-
   const localCwd = process.cwd();
   // pi's AgentTool type omits the ctx param (5th arg) built-in tools accept at runtime;
   // forwarding it is required for PI_* session env injection (e.g. PI_MODEL)
@@ -300,10 +297,23 @@ export function registerExtension(pi: ExtensionAPI) {
     if (!(pi.getFlag('container') as boolean)) return;
 
     try {
-      const runtime = await detectRuntime(ctx);
+      const runtime = await detectRuntime();
       if (!runtime) {
-        ctx.ui.notify('Podman not available or timed out. Running without sandbox.', 'warning');
+        let requirement = 'Sandbox supports macOS with Apple Containers and Linux with Podman.';
+        if (process.platform === 'darwin') {
+          requirement =
+            'Apple Container is unavailable or not running. Start it with `container system start`.';
+        } else if (process.platform === 'linux') {
+          requirement = 'Podman is unavailable or not responding.';
+        }
+        ctx.ui.notify(`${requirement} Running without sandbox.`, 'warning');
         return;
+      }
+      if (runtime.kind === 'apple') {
+        ctx.ui.notify(
+          'Apple Containers apply CPU/memory limits and drop capabilities; PID, swap, disk, and no-new-privileges controls are unavailable.',
+          'warning',
+        );
       }
 
       const workspace = resolveSandboxWorkspace(localCwd);
@@ -323,6 +333,12 @@ export function registerExtension(pi: ExtensionAPI) {
       const image = flagImage || configImageRef || 'pi-sandbox:latest';
       const allowNetwork =
         (pi.getFlag('container-net') as boolean) || (pi.getFlag('browser') as boolean);
+      if (!allowNetwork && runtime.kind === 'apple') {
+        ctx.ui.notify(
+          'Apple Containers use a host-only network without NAT; this is not a fully disconnected network.',
+          'warning',
+        );
+      }
       const keep = pi.getFlag('container-keep') as boolean;
       const persist = (pi.getFlag('sandbox-persist') as boolean) || (config?.persist ?? true);
       const mountSkills = pi.getFlag('container-mount-skills') as boolean;
@@ -356,49 +372,37 @@ export function registerExtension(pi: ExtensionAPI) {
       //   - Stopped  → start if reusable/persist, otherwise remove for fresh slate
       //   - Missing  → create new
       let isReattached = false;
-      {
-        const running = await runtime.isRunning(sandboxName);
-        if (running) {
-          isReattached = true;
-          ctx.ui.notify(`⇄ Reattaching to existing sandbox: ${sandboxName}`, 'info');
-        } else {
-          // Check if container exists at all (stopped state)
-          const inspect = await spawnWithTimeout(
-            runtime.bin,
-            ['inspect', '--format', 'exists', sandboxName],
-            5000,
-          );
-          if (inspect.code === 0 && !inspect.timedOut) {
-            // Container exists but is not running
-            if (isReusable) {
-              // Reusable or persist mode → start the stopped container
-              const started = await runtime.start(sandboxName);
-              if (started) {
-                isReattached = true;
-                ctx.ui.notify(`↻ Restarted existing sandbox: ${sandboxName}`, 'info');
-              } else {
-                // Start failed — remove it and create fresh
-                ctx.ui.notify(
-                  `Removing broken container ${sandboxName}, creating fresh...`,
-                  'warning',
-                );
-                runtime.remove(sandboxName);
-              }
-            } else {
-              // Non-reusable, non-persist → remove stale container for clean slate
-              ctx.ui.notify(`Cleaning up stale container ${sandboxName} for fresh sandbox`, 'info');
-              runtime.remove(sandboxName);
-            }
+      const state = await runtime.containerState(sandboxName);
+      if (state === 'running') {
+        isReattached = true;
+        ctx.ui.notify(`⇄ Reattaching to existing sandbox: ${sandboxName}`, 'info');
+      } else if (state) {
+        // Container exists but is not running
+        if (isReusable) {
+          // Reusable or persist mode → start the stopped container
+          const started = await runtime.start(sandboxName);
+          if (started) {
+            isReattached = true;
+            ctx.ui.notify(`↻ Restarted existing sandbox: ${sandboxName}`, 'info');
+          } else {
+            // Start failed — remove it and create fresh
+            ctx.ui.notify(`Removing broken container ${sandboxName}, creating fresh...`, 'warning');
+            runtime.remove(sandboxName);
           }
+        } else {
+          // Non-reusable, non-persist → remove stale container for clean slate
+          ctx.ui.notify(`Cleaning up stale container ${sandboxName} for fresh sandbox`, 'info');
+          runtime.remove(sandboxName);
         }
       }
 
-      if (!(await runtime.exists(image))) {
+      if (!(await runtime.imageExists(image))) {
         ctx.ui.notify(`Sandbox image "${image}" not found locally, pulling from registry...`);
-        const pull = await spawnWithTimeout(runtime.bin, ['pull', image], 120000);
-        if (pull.code !== 0 || pull.timedOut) {
+        const pulled = await runtime.pullImage(image, 120000);
+        if (!pulled) {
+          const buildCommand = runtime.kind === 'apple' ? 'container' : 'podman';
           ctx.ui.notify(
-            `Sandbox image "${image}" not found. Pull failed. Build it manually:\n  podman build -t ${image} -f containers/Containerfile containers`,
+            `Sandbox image "${image}" not found. Pull failed. Build it manually:\n  ${buildCommand} build -t ${image} -f containers/Containerfile containers`,
             'error',
           );
           return;
@@ -521,11 +525,16 @@ export function registerExtension(pi: ExtensionAPI) {
         `size=${sizeTier}`,
         `mem=${resources.memory}`,
         `cpu=${resources.cpus}`,
-        `swap=${resources.swap}`,
-        `disk=${resources.disk}`,
       ];
-      if (resources.pidsLimit !== undefined) resParts.push(`pids=${resources.pidsLimit}`);
+      if (runtime.kind === 'podman') {
+        if (resources.swap) resParts.push(`swap=${resources.swap}`);
+        if (resources.disk) resParts.push(`disk=${resources.disk}`);
+        if (resources.pidsLimit !== undefined) resParts.push(`pids=${resources.pidsLimit}`);
+      }
       const resStr = ` (${resParts.join(', ')})`;
+      const runtimeName = runtime.kind === 'apple' ? 'Apple Container' : 'Podman';
+      let networkStatus = allowNetwork ? 'on' : 'off';
+      if (!allowNetwork && runtime.kind === 'apple') networkStatus = 'host-only';
 
       const statusPrefix = isReattached ? '✓ Reattached' : '󰞀 Sandbox up';
       ctx.ui.setStatus('sandbox', undefined);
@@ -534,13 +543,13 @@ export function registerExtension(pi: ExtensionAPI) {
         [
           ctx.ui.theme.fg(
             'accent',
-            `${statusPrefix}: ${actualName} (net=${allowNetwork ? 'on' : 'off'})${resStr}`,
+            `${statusPrefix}: ${actualName} (net=${networkStatus})${resStr}`,
           ),
         ],
         { placement: 'belowEditor' },
       );
       ctx.ui.notify(
-        `${statusPrefix}: podman ${actualName}${resStr}${sandbox.keep ? ' [persistent]' : ''}\n${ok}${skillMounts.length ? `\nSkills mounted: ${skillMounts.map(m => m.target).join(', ')}` : ''}${cacheVolume ? `\nCache volume: ${cacheVolume} at /cache` : ''}`,
+        `${statusPrefix}: ${runtimeName} ${actualName}${resStr}${sandbox.keep ? ' [persistent]' : ''}\n${ok}${skillMounts.length ? `\nSkills mounted: ${skillMounts.map(m => m.target).join(', ')}` : ''}${cacheVolume ? `\nCache volume: ${cacheVolume} at /cache` : ''}`,
         'info',
       );
 

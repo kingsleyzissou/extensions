@@ -1,7 +1,7 @@
 {
   "name": "@kingsleyzissou/sandbox",
   "version": "0.1.0",
-  "description": "pi extension that runs tool operations inside persistent per-repository Podman containers",
+  "description": "pi extension using Apple Containers on macOS and Podman on Linux",
   "module": "index.ts",
   "type": "module",
   "keywords": [
@@ -9,6 +9,7 @@
     "pi-extension",
     "sandbox",
     "container",
+    "apple-containers",
     "podman",
     "security"
   ],
@@ -18,7 +19,7 @@
     "containers/"
   ],
   "scripts": {
-    "build": "podman build -t pi-sandbox:latest -f containers/Containerfile containers"
+    "build": "./build.sh"
   },
   "pi": {
     "extensions": [
