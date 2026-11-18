@@ -13,7 +13,7 @@ import {
   saveSandboxProjectConfig,
 } from './config';
 import type { PathApprovalStore } from './path-approvals';
-import type { Sandbox } from './sandbox';
+import type { Sandbox } from './types';
 import { execCapture } from './operations';
 import { podmanRuntime, randomSuffix, spawnWithTimeout } from './runtime';
 

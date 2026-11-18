@@ -1,25 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { type Runtime, spawnWithTimeout } from './runtime';
+import type { GitIdentity, Runtime, SandboxProjectConfig } from './types/index';
+import { spawnWithTimeout } from './runtime';
 
 // Per-project sandbox config (.pi/agent/sandbox.json)
 // ---------------------------------------------------------------------------
-
-export interface GitIdentity {
-  user: {
-    name: string;
-    email: string;
-  };
-}
-
-export interface SandboxProjectConfig {
-  image: string;
-  tag: string;
-  pinned: boolean;
-  lastDigest: string | null;
-  lastCheckedAt: number | null;
-  git: GitIdentity | null;
-}
 
 export const DEFAULT_SANDBOX_PROJECT_CONFIG: SandboxProjectConfig = {
   image: 'pi-sandbox',
