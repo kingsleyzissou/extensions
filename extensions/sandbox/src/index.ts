@@ -78,7 +78,7 @@ import {
   saveSandboxProjectConfig,
 } from './config';
 import { PathApprovalStore } from './path-approvals';
-import { registerSandboxCommands } from './commands';
+import { registerSandboxCommands } from './command';
 import type { RunArgs, Sandbox } from './types';
 import {
   bashOps,
