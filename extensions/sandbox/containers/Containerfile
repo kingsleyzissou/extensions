@@ -11,7 +11,9 @@
 #   Build automatically detects host arch (aarch64 or x86_64) and sources
 #   the matching hashes/<arch>.env file for download URLs and SHA256s.
 #
-# Built with:
+# Built with on macOS:
+#   container build -t pi-container-sandbox:latest -f containers/Containerfile containers
+# Built with on Linux:
 #   podman build -t pi-container-sandbox:latest -f containers/Containerfile containers
 FROM registry.fedoraproject.org/fedora-minimal:44
 
@@ -118,8 +120,8 @@ RUN printf '#!/bin/sh\nexec uv pip "$@"\n' > /usr/local/bin/pip \
  && chmod +x /usr/local/bin/pip /usr/local/bin/pip3
 
 # ── Bash aliases (for interactive use only — `!` commands) ──────────
-# NOTE: Heredocs don't work reliably in Containerfiles (podman interprets
-# lines like `alias` as instructions). Use printf instead.
+# NOTE: Keep shell aliases in files with printf; a Containerfile parses
+# unindented lines like `alias` as instructions.
 RUN printf '\n# Modern tool aliases for pi-container-sandbox\nalias ll="eza --icons -l --git"\nalias la="eza --icons -la --git"\nalias lt="eza --icons --tree --level=3"\n' >> /etc/bashrc
 
 RUN printf '# Modern tool aliases for pi-container-sandbox (login shells)\nalias ll="eza --icons -l --git"\nalias la="eza --icons -la --git"\nalias lt="eza --icons --tree --level=3"\n' > /etc/profile.d/sandbox-aliases.sh

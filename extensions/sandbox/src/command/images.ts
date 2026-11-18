@@ -9,7 +9,7 @@ import {
   loadSandboxProjectConfig,
   saveSandboxProjectConfig,
 } from '../config';
-import { podmanRuntime, randomSuffix, spawnWithTimeout } from '../runtime';
+import { detectRuntime, randomSuffix } from '../runtime';
 import type { SandboxCommandDependencies } from './context';
 
 export async function cmdSandboxInstall(
@@ -21,8 +21,16 @@ export async function cmdSandboxInstall(
   const cfg = loadSandboxProjectConfig(hostCwd);
   const imageRef = imageRefForTag(cfg.image, cfg.tag);
 
-  // Detect runtime (Podman) — works without an active sandbox container
-  const runtime = podmanRuntime();
+  const runtime = await detectRuntime();
+  if (!runtime) {
+    ctx.ui.notify(
+      process.platform === 'darwin'
+        ? 'Apple Container is unavailable. Start it with `container system start`.'
+        : 'Podman is unavailable or not responding.',
+      'error',
+    );
+    return;
+  }
 
   // 1. Check if image already exists locally
   const localDigest = await inspectLocalImageDigest(runtime, imageRef);
@@ -38,12 +46,12 @@ export async function cmdSandboxInstall(
 
   // 2. Pull the image
   ctx.ui.notify(`↓ Installing sandbox image: ${imageRef}...`);
-  const pull = await spawnWithTimeout(runtime.bin, ['pull', imageRef], 180000);
-  if (pull.code !== 0 || pull.timedOut) {
+  const pulled = await runtime.pullImage(imageRef, 180000);
+  if (!pulled) {
     ctx.ui.notify(
       `${ctx.ui.theme.fg('error', '×')} Failed to pull ${imageRef}.\n` +
-        `   Check Podman connectivity or build manually:\n` +
-        `   podman build -t ${imageRef} -f containers/Containerfile containers`,
+        `   Check runtime connectivity or build manually:\n` +
+        `   ${runtime.kind === 'apple' ? 'container' : 'podman'} build -t ${imageRef} -f containers/Containerfile containers`,
       'error',
     );
     return;
@@ -59,16 +67,12 @@ export async function cmdSandboxInstall(
 
   // 4. Quick smoke test — run a throwaway container to verify the image works
   const testName = `pi-install-test-${randomSuffix()}`;
-  const smoke = await spawnWithTimeout(
-    runtime.bin,
-    ['run', '--rm', '--name', testName, imageRef, 'sh', '-c', 'id -un && pwd'],
-    15000,
-  );
-  if (smoke.code === 0 && !smoke.timedOut) {
+  const smoke = await runtime.smokeTest(testName, imageRef, 15000);
+  if (smoke !== null) {
     ctx.ui.notify(
       `${ctx.ui.theme.fg('success', '✓')} Installed: ${imageRef}\n` +
         `   Digest: ${tagInfo?.digest?.slice(0, 19) ?? 'unknown'}...\n` +
-        `   Smoke test: ${smoke.stdout.trim()}\n` +
+        `   Smoke test: ${smoke}\n` +
         `   Run \`pi -e ./index.ts\` to start using the sandbox.`,
       'info',
     );
@@ -96,8 +100,8 @@ export async function cmdSandboxUpdate(
   const imageRef = imageRefForTag(cfg.image, cfg.tag);
 
   ctx.ui.notify(`↓ Pulling ${imageRef}...`);
-  const pull = await spawnWithTimeout(sbx.runtime.bin, ['pull', imageRef], 120000);
-  if (pull.code !== 0 || pull.timedOut) {
+  const pulled = await sbx.runtime.pullImage(imageRef, 120000);
+  if (!pulled) {
     ctx.ui.notify(`${ctx.ui.theme.fg('error', '×')} Failed to pull ${imageRef}.`, 'error');
     return;
   }

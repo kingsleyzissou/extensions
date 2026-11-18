@@ -23,10 +23,12 @@ export async function cmdSandboxStatus(
   const resParts: string[] = [];
   if (sbx.resources?.memory) resParts.push(`memory: ${sbx.resources.memory}`);
   if (sbx.resources?.cpus) resParts.push(`cpus: ${sbx.resources.cpus}`);
-  if (sbx.resources?.disk) resParts.push(`disk: ${sbx.resources.disk}`);
-  if (sbx.resources?.swap !== undefined) resParts.push(`swap: ${sbx.resources.swap}`);
-  if (sbx.resources?.pidsLimit !== undefined)
-    resParts.push(`pids-limit: ${sbx.resources.pidsLimit}`);
+  if (sbx.runtime.kind === 'podman') {
+    if (sbx.resources?.disk) resParts.push(`disk: ${sbx.resources.disk}`);
+    if (sbx.resources?.swap !== undefined) resParts.push(`swap: ${sbx.resources.swap}`);
+    if (sbx.resources?.pidsLimit !== undefined)
+      resParts.push(`pids-limit: ${sbx.resources.pidsLimit}`);
+  }
   const resStr = resParts.length ? `\nresources: ${resParts.join(', ')}` : '';
   const reusableStr = sbx.keep ? ` [persistent${sbx.isReattached ? ', reattached' : ''}]` : '';
   const cfg = sbx.projectConfig;
