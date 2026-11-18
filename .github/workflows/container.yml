@@ -7,16 +7,40 @@ on:
       - 'extensions/sandbox/containers/**'
   pull_request:
     branches: [main]
-    paths:
-      - 'extensions/sandbox/containers/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  changes:
+    name: Detect container changes
+    runs-on: ubuntu-latest
+    outputs:
+      containers: ${{ steps.filter.outputs.containers }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]] || \
+            ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              extensions/sandbox/containers; then
+            echo "containers=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "containers=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build_matrix:
     name: Build (${{ matrix.arch }})
+    needs: changes
+    if: ${{ needs.changes.outputs.containers == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -37,3 +61,26 @@ jobs:
             -t pi-sandbox:latest \
             -f extensions/sandbox/containers/Containerfile \
             extensions/sandbox/containers
+
+  build:
+    name: Build
+    needs: [changes, build_matrix]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report container build result
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CONTAINERS_CHANGED: ${{ needs.changes.outputs.containers }}
+          BUILD_RESULT: ${{ needs.build_matrix.result }}
+        run: |
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Container change detection failed: $CHANGES_RESULT"
+            exit 1
+          fi
+
+          if [[ "$CONTAINERS_CHANGED" == "true" ]] && \
+            [[ "$BUILD_RESULT" != "success" ]]; then
+            echo "Container build failed: $BUILD_RESULT"
+            exit 1
+          fi
