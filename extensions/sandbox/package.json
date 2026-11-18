@@ -14,7 +14,7 @@
   ],
   "files": [
     "index.ts",
-    "worktrees.ts",
+    "src/",
     "containers/"
   ],
   "scripts": {

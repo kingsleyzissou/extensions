@@ -6,7 +6,7 @@ import {
   listSandboxWorktrees,
   resolveSandboxWorkspace,
   sandboxPathForHostPath,
-} from './worktrees.ts';
+} from '../src/worktrees';
 
 function createBareRepo(root: string): void {
   mkdirSync(resolve(root, 'objects'), { recursive: true });
